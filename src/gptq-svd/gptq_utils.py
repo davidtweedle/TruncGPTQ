@@ -3,7 +3,7 @@ import jax
 import math
 from jax.dlpack import from_dlpack
 
-class quantizer:
+class Quantizer:
 
     def __init__(self, per_channel=True, w_bits=4):
         self.per_channel = per_channel
