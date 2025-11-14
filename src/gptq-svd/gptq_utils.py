@@ -164,12 +164,14 @@ if __name__ == '__main__':
     q = Quantizer(per_channel=True, w_bits=2)
 
     gptq_fwrd(
+            sketch_dim=n,
             oversample=16,
-            k_iter=5,
+            k_iter=0,
             make_stream=make_stream,
             weight_mat=weight_mat,
             out_weight=out_weight,
-            quantizer=q
+            quantizer=q,
+            eps=1e-5
             )
     Y_quant = X @ out_weight.T
 
