@@ -221,17 +221,17 @@ if __name__ == '__main__':
 
         Y_full = X @ weight_mat.T
 
-        q = Quantizer(per_channel=True, w_bits=4)
+        q = Quantizer(per_channel=True, w_bits=2)
 
         gptq_fwrd(
-                sketch_dim=n // 8,
+                sketch_dim=4 * n,
                 oversample=16,
                 k_iter=2,
                 make_stream=make_stream,
                 weight_mat=weight_mat,
                 out_weight=out_weight,
                 quantizer=q,
-                eps=1e-1
+                eps=1e-2
                 )
         Y_quant = X @ out_weight.T
 
@@ -245,7 +245,7 @@ if __name__ == '__main__':
         w_diff = torch.norm(weight_mat - out_weight) / torch.norm(weight_mat)
         print(f"Relative weight error ||W - W_q|| / ||W||    = {w_diff.item():.4e}")
         # Baseline: plain quantization with no GPTQ corrections
-        q_baseline = Quantizer(per_channel=True, w_bits=4)
+        q_baseline = Quantizer(per_channel=True, w_bits=2)
         q_baseline.init_scale(weight_mat_original := weight_mat.clone())
         W_plain_q = q_baseline.quantize(weight_mat_original)
         Y_plain_q = X @ W_plain_q.T
