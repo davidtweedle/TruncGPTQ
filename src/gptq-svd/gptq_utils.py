@@ -210,7 +210,8 @@ if __name__ == '__main__':
     for mode in modes:
         print(f"\n=== Mode: {mode} ===")
         X = make_X(num_samples, n, mode=mode, rho=0.9, nu=3.0, device=device, dtype=dtype)
-        weight_mat = torch.randn(m, n, device=device, dtype=dtype)
+        W0 = torch.randn(m, n, device=device, dtype=dtype)
+        weight_mat = W0.clone()
         out_weight = torch.zeros_like(weight_mat)
 
         batch_size = 1024
@@ -246,7 +247,7 @@ if __name__ == '__main__':
         print(f"Relative weight error ||W - W_q|| / ||W||    = {w_diff.item():.4e}")
         # Baseline: plain quantization with no GPTQ corrections
         q_baseline = Quantizer(per_channel=True, w_bits=2)
-        q_baseline.init_scale(weight_mat_original := weight_mat.clone())
+        q_baseline.init_scale(weight_mat_original := W0.clone())
         W_plain_q = q_baseline.quantize(weight_mat_original)
         Y_plain_q = X @ W_plain_q.T
 
