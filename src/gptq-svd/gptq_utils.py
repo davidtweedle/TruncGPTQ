@@ -140,7 +140,7 @@ if __name__ == '__main__':
     torch.manual_seed(0)
 
     num_samples = 1024 * 256
-    n = 4096
+    n = 2048
     m = 256
     device = torch.device("cuda")
     dtype = torch.float32
