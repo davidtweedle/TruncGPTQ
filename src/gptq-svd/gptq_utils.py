@@ -138,7 +138,6 @@ def gptq_fwrd(
 
 if __name__ == '__main__':
     torch.manual_seed(0)
-    np.random.seed(0)
 
     num_samples = 1024
     n = 256
