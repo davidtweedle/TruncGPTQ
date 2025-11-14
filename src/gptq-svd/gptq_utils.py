@@ -119,13 +119,68 @@ def gptq_fwrd(
         c = Up.T @ u_j
         c_scaled = c / Sp
         delta_mask = (weight_mat[:, j: j + 1] - q_j) * (Vph.T @ c_scaled)
-        print(f"Shapes: {c_scaled.shape}, {delta_mask.shape}")
         full_delta = torch.zeros_like(weight_mat)
         full_delta[:, mask] = delta_mask
         weight_mat += full_delta.to(dtype)
         out_weight[:, j: j + 1] = q_j
 
     out_weight[:, mask] = quantizer.quantize(weight_mat[:, mask])
+
+def make_ar1_cholesky(n, rho=0.9, device="cuda", dtype=torch.float32):
+    idx = torch.arange(n, device=device)
+    dist = (idx[None, :] - idx[:, None]).abs()
+    Sigma = rho ** dist
+    Sigma = Sigma + 1e-6 * torch.eye(n, device=device, dtype=dtype)
+    L = torch.linalg.cholesky(Sigma)
+    return L
+
+
+def make_X(
+        num_samples: int,
+        n: int,
+        mode: str = "gaussian",
+        rho: float = 0.9,
+        nu: float = 3.0,
+        device="cuda",
+        dtype=torch.float32
+        ):
+    device = torch.device(device)
+    if mode == "gaussian":
+        X = torch.randn(num_samples, n, device=device, dtype=dtype)
+        return X
+
+    if mode == "gaussian_corr":
+        L = make_ar1_cholesky(n, rho=rho, device=device, dtype=dtype)
+        Z = torch.randn(num_samples, n, device=device, dtype=dtype)
+        X = Z @ L.T
+        return X
+
+    if mode == "student_t":
+        t_dist = torch.distributions.StudentT(df=nu)
+        X = t_dist.sample((num_samples, n)).to(device=device, dtype=dtype)
+        if nu > 2:
+            X = X / torch.sqrt(torch.tensor(nu / (nu - 2), device=device, dtype=dtype))
+        return X
+    
+    if mode == "student_t_corr":
+        L = make_ar1_cholesky(n, rho=rho, device=device, dtype=dtype)
+        Z = torch.randn(num_samples, n, device=device, dtype=dtype)
+        Y = Z @ L.T
+        chi2 = torch.distributions.Chi2(df=nu).sample((num_samples,)).to(device=device, dtype=dtype)
+        scale = torch.sqrt(nu / chi2).view(-1, 1)
+        X = Y * scale
+        return X
+
+    if mode == "lognormal_corr":
+        L = make_ar1_cholesky(n, rho=rho, device=device, dtype=dtype)
+        Z = torch.randn(num_samples, n, device=device, dtype=dtype)
+        G = Z @ L.T
+        X = torch.exp(G)
+        return X
+
+    raise ValueError(f"Unknown mode: {mode}")
+
+
 
     # notes -- B = Q.T @ X -- d by n
     # U ~ Q @ U_tilde
@@ -149,53 +204,57 @@ if __name__ == '__main__':
     m = 64
     device = torch.device("cuda")
     dtype = torch.float32
-    X = torch.randn(num_samples, n, device=device, dtype=dtype)
-    weight_mat = torch.randn(m, n, device=device, dtype=dtype)
-    out_weight = torch.zeros_like(weight_mat)
+    # X = torch.randn(num_samples, n, device=device, dtype=dtype)
+    modes = ["gaussian", "gaussian_corr", "student_t", "student_t_corr", "lognormal_corr"]
+    for mode in modes:
+        print(f"\n=== Mode: {mode} ===")
+        X = make_X(num_samples, n, mode=mode, rho=0.9, nu=3.0, device=device, dtype=dtype)
+        weight_mat = torch.randn(m, n, device=device, dtype=dtype)
+        out_weight = torch.zeros_like(weight_mat)
 
-    batch_size = 1024
+        batch_size = 1024
 
-    def make_stream():
-        for i in range(0, num_samples, batch_size):
-            yield X[i : i + batch_size]
+        def make_stream():
+            for i in range(0, num_samples, batch_size):
+                yield X[i : i + batch_size]
 
-    Y_full = X @ weight_mat.T
+        Y_full = X @ weight_mat.T
 
-    q = Quantizer(per_channel=True, w_bits=2)
+        q = Quantizer(per_channel=True, w_bits=4)
 
-    gptq_fwrd(
-            sketch_dim=n,
-            oversample=16,
-            k_iter=0,
-            make_stream=make_stream,
-            weight_mat=weight_mat,
-            out_weight=out_weight,
-            quantizer=q,
-            eps=1e-5
-            )
-    Y_quant = X @ out_weight.T
+        gptq_fwrd(
+                sketch_dim=n // 4,
+                oversample=16,
+                k_iter=0,
+                make_stream=make_stream,
+                weight_mat=weight_mat,
+                out_weight=out_weight,
+                quantizer=q,
+                eps=1e-1
+                )
+        Y_quant = X @ out_weight.T
 
-    diff = Y_full - Y_quant
-    rel_err = torch.norm(diff) / torch.norm(Y_full)
-    max_err = diff.abs().max()
-    print(f"Relative output error ||XW - XW_q|| / ||XW|| = {rel_err.item():.4e}")
-    print(f"Max absolute entrywise error on outputs      = {max_err.item():.4e}")
+        diff = Y_full - Y_quant
+        rel_err = torch.norm(diff) / torch.norm(Y_full)
+        max_err = diff.abs().max()
+        print(f"Relative output error ||XW - XW_q|| / ||XW|| = {rel_err.item():.4e}")
+        print(f"Max absolute entrywise error on outputs      = {max_err.item():.4e}")
 
-    # Also check weight error
-    w_diff = torch.norm(weight_mat - out_weight) / torch.norm(weight_mat)
-    print(f"Relative weight error ||W - W_q|| / ||W||    = {w_diff.item():.4e}")
-    # Baseline: plain quantization with no GPTQ corrections
-    q_baseline = Quantizer(per_channel=True, w_bits=2)
-    q_baseline.init_scale(weight_mat_original := weight_mat.clone())
-    W_plain_q = q_baseline.quantize(weight_mat_original)
-    Y_plain_q = X @ W_plain_q.T
+        # Also check weight error
+        w_diff = torch.norm(weight_mat - out_weight) / torch.norm(weight_mat)
+        print(f"Relative weight error ||W - W_q|| / ||W||    = {w_diff.item():.4e}")
+        # Baseline: plain quantization with no GPTQ corrections
+        q_baseline = Quantizer(per_channel=True, w_bits=2)
+        q_baseline.init_scale(weight_mat_original := weight_mat.clone())
+        W_plain_q = q_baseline.quantize(weight_mat_original)
+        Y_plain_q = X @ W_plain_q.T
 
-    diff_plain = Y_full - Y_plain_q
-    rel_err_plain = torch.norm(diff_plain) / torch.norm(Y_full)
-    max_err_plain = diff_plain.abs().max()
-    w_rel_plain = torch.norm(weight_mat_original - W_plain_q) / torch.norm(weight_mat_original)
+        diff_plain = Y_full - Y_plain_q
+        rel_err_plain = torch.norm(diff_plain) / torch.norm(Y_full)
+        max_err_plain = diff_plain.abs().max()
+        w_rel_plain = torch.norm(weight_mat_original - W_plain_q) / torch.norm(weight_mat_original)
 
-    print("=== Plain quantization baseline ===")
-    print(f"Rel output error (plain) = {rel_err_plain.item():.4e}")
-    print(f"Max output error (plain)  = {max_err_plain.item():.4e}")
-    print(f"Rel weight error (plain)  = {w_rel_plain.item():.4e}")
+        print("=== Plain quantization baseline ===")
+        print(f"Rel output error (plain) = {rel_err_plain.item():.4e}")
+        print(f"Max output error (plain)  = {max_err_plain.item():.4e}")
+        print(f"Rel weight error (plain)  = {w_rel_plain.item():.4e}")
