@@ -140,7 +140,7 @@ if __name__ == '__main__':
     torch.manual_seed(0)
 
     num_samples = 1024 * 256
-    n = 1024
+    n = 4096
     m = 256
     device = torch.device("cuda")
     dtype = torch.float32
@@ -159,8 +159,8 @@ if __name__ == '__main__':
     q = Quantizer(per_channel=True, w_bits=2)
 
     gptq_fwrd(
-            oversample=8,
-            k_iter=2,
+            oversample=16,
+            k_iter=5,
             make_stream=make_stream,
             weight_mat=weight_mat,
             out_weight=out_weight,
