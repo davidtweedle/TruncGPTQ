@@ -178,7 +178,7 @@ if __name__ == '__main__':
     w_diff = torch.norm(weight_mat - out_weight) / torch.norm(weight_mat)
     print(f"Relative weight error ||W - W_q|| / ||W||    = {w_diff.item():.4e}")
     # Baseline: plain quantization with no GPTQ corrections
-    q_baseline = Quantizer(per_channel=True, w_bits=4)
+    q_baseline = Quantizer(per_channel=True, w_bits=2)
     q_baseline.init_scale(weight_mat_original := weight_mat.clone())
     W_plain_q = q_baseline.quantize(weight_mat_original)
     Y_plain_q = X @ W_plain_q.T
