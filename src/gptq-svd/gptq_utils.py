@@ -139,7 +139,7 @@ def gptq_fwrd(
 if __name__ == '__main__':
     torch.manual_seed(0)
 
-    num_samples = 1024 ** 2
+    num_samples = 1024 * 256
     n = 1024
     m = 256
     device = torch.device("cuda")
