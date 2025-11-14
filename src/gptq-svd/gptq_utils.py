@@ -139,9 +139,9 @@ def gptq_fwrd(
 if __name__ == '__main__':
     torch.manual_seed(0)
 
-    num_samples = 1024
-    n = 256
-    m = 16
+    num_samples = 8192
+    n = 1024
+    m = 1024
     device = torch.device("cpu")
     dtype = torch.float32
     X = torch.randn(num_samples, n, device=device, dtype=dtype)
