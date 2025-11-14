@@ -100,7 +100,7 @@ def gptq_fwrd(
     U_tilde, S, Vh = torch.linalg.svd(B, full_matrices=False)
     U_tilde, S, Vh = U_tilde[:, :d], S[:d], Vh[:d]
     SVh = torch.diag(S) @ Vh
-    SVh_jax = from_dlpack(torch.utils.dlpack.to_dlpack(SVh))
+    SVh_jax = from_dlpack(SVh)
     _, _, P_jax = jax.scipy.linalg.qr(SVh_jax, pivoting=True, mode='economic')
     P = torch.from_dlpack(P_jax)
     quantizer.init_scale(weight_mat)
