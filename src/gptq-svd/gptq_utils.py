@@ -292,7 +292,7 @@ if __name__ == '__main__':
         diff_svd = Y_full - Y_quant_svd
         rel_err_svd = torch.norm(diff_svd) / torch.norm(Y_full)
         max_err_svd = diff_svd.abs().max()
-        print("SVD Errors:\n"}
+        print("SVD Errors:\n")
         print(f"Relative output error ||XW - XW_q|| / ||XW|| = {rel_err_svd.item():.4e}")
         print(f"Max absolute entrywise error on outputs      = {max_err_svd.item():.4e}")
         weight_mat_ref = W0.clone()
