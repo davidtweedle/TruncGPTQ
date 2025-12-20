@@ -112,9 +112,8 @@ def gptq_ref_fwrd(
         for i in range(count):
             w = W1[:, i]
             d = Hinv1[i, i]
-            q = quantizer.quantize(w.unflatten(dim=-1, sizes=(-1, 1))).flatten()
-            print(f"Shapes: w: {w.shape}, q: {q.shape}, Q1[:,i]: {Q1[:, i].shape}")
-            Q1[:, i] = q.flatten()
+            q = quantizer.quantize(w.unsqueeze(1)).flatten()
+            Q1[:, i] = q
             Losses1[:, i] = (w - q) ** 2 / d ** 2
             err1 = (w - q) / d
             W1[:, i:] -= err1.unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
@@ -122,7 +121,7 @@ def gptq_ref_fwrd(
         out_weight[:, i1:i2] = Q1
         Losses[:, i1:i2] = Losses1 / 2
         W[:, i2:] -= Err1.matmul(Hinv[i1:i2, i2:])
-    avg_loss = torch.sum(Losses).item() / nsamples
+    avg_loss = torch.sum(Losses).item() / n_samples
     print(f"Losses sum item: {torch.sum(Losses).item()}")
     print(f"Average loss: {avg_loss}")
 
