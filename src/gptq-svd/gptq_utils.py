@@ -299,6 +299,7 @@ if __name__ == '__main__':
         q_ref = Quantizer(per_channel=True, w_bits=4)
         out_weight_ref = torch.zeros_like(weight_mat_ref)
 
+        print("Reference GPTQ errors")
         gptq_ref_fwrd(
                 make_stream=make_stream,
                 weight_mat=weight_mat_ref,
@@ -311,7 +312,6 @@ if __name__ == '__main__':
         diff_ref = Y_full - Y_quant_ref
         rel_err_ref = torch.norm(diff_ref) / torch.norm(Y_full)
         max_err_ref = diff_ref.abs().max()
-        print("Reference GPTQ errors")
         print(f"Relative output error ||XW - XW_q|| / ||XW|| = {rel_err_ref.item():.4e}")
         print(f"Max absolute entrywise error on outputs      = {max_err_ref.item():.4e}")
 
@@ -334,8 +334,11 @@ if __name__ == '__main__':
         print(f"Rel output error (plain) = {rel_err_plain.item():.4e}")
         print(f"Max output error (plain)  = {max_err_plain.item():.4e}")
         print(f"Rel weight error (plain)  = {w_rel_plain.item():.4e}")
-        del X, W_plain_q, weight_mat, weight_mat_original
-        del out_weight, Y_full, Y_quant, Y_plain_q
-        del diff_plain
+        del X, W0, weight_mat, out_weight, Y_full, q
+        del Y_quant_svd, diff_svd, rel_err_svd, max_err_svd
+        del weight_mat_ref, q_ref, out_weight_ref, Y_quant_ref
+        del diff_ref, rel_err_ref, max_err_ref, w_diff_ref
+        del q_baseline, W_plain_q, Y_plain_q, diff_plain, rel_err_plain
+        del max_err_plain, w_rel_plain
         gc.collect()
         torch.cuda.empty_cache()
