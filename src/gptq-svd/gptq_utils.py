@@ -275,7 +275,7 @@ if __name__ == '__main__':
 
         Y_full = X @ W0.T
 
-        q = Quantizer(per_channel=True, w_bits=8)
+        q = Quantizer(per_channel=True, w_bits=4)
 
         gptq_svd_fwrd(
                 sketch_dim=4 * n,
@@ -298,7 +298,7 @@ if __name__ == '__main__':
         w_diff_svd = torch.norm(W0 - out_weight) / torch.norm(W0)
         print(f"Relative weight error ||W - W_q|| / ||W||    = {w_diff_svd.item():.4e}")
         weight_mat_ref = W0.clone()
-        q_ref = Quantizer(per_channel=True, w_bits=8)
+        q_ref = Quantizer(per_channel=True, w_bits=4)
         out_weight_ref = torch.zeros_like(weight_mat_ref)
 
         print("Reference GPTQ errors")
@@ -322,7 +322,7 @@ if __name__ == '__main__':
         w_diff_ref = torch.norm(W0 - out_weight_ref) / torch.norm(W0)
         print(f"Relative weight error ||W - W_q|| / ||W||    = {w_diff_ref.item():.4e}")
         # Baseline: plain quantization with no GPTQ corrections
-        q_baseline = Quantizer(per_channel=True, w_bits=8)
+        q_baseline = Quantizer(per_channel=True, w_bits=4)
         q_baseline.init_scale(weight_mat_original := W0.clone())
         W_plain_q = q_baseline.quantize(weight_mat_original)
         Y_plain_q = X @ W_plain_q.T
