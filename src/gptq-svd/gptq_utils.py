@@ -255,7 +255,7 @@ if __name__ == '__main__':
 
     num_samples = 1024 * 32
     n = 512
-    m = 64
+    m = 512
     device = torch.device("cuda")
     dtype = torch.float32
     # X = torch.randn(num_samples, n, device=device, dtype=dtype)
@@ -275,7 +275,7 @@ if __name__ == '__main__':
 
         Y_full = X @ W0.T
 
-        q = Quantizer(per_channel=True, w_bits=4)
+        q = Quantizer(per_channel=True, w_bits=8)
 
         gptq_svd_fwrd(
                 sketch_dim=4 * n,
@@ -295,8 +295,10 @@ if __name__ == '__main__':
         print("SVD Errors:\n")
         print(f"Relative output error ||XW - XW_q|| / ||XW|| = {rel_err_svd.item():.4e}")
         print(f"Max absolute entrywise error on outputs      = {max_err_svd.item():.4e}")
+        w_diff_svd = torch.norm(W0 - out_weight) / torch.norm(W0)
+        print(f"Relative weight error ||W - W_q|| / ||W||    = {w_diff_ref.item():.4e}")
         weight_mat_ref = W0.clone()
-        q_ref = Quantizer(per_channel=True, w_bits=4)
+        q_ref = Quantizer(per_channel=True, w_bits=8)
         out_weight_ref = torch.zeros_like(weight_mat_ref)
 
         print("Reference GPTQ errors")
@@ -320,7 +322,7 @@ if __name__ == '__main__':
         w_diff_ref = torch.norm(W0 - out_weight_ref) / torch.norm(W0)
         print(f"Relative weight error ||W - W_q|| / ||W||    = {w_diff_ref.item():.4e}")
         # Baseline: plain quantization with no GPTQ corrections
-        q_baseline = Quantizer(per_channel=True, w_bits=4)
+        q_baseline = Quantizer(per_channel=True, w_bits=8)
         q_baseline.init_scale(weight_mat_original := W0.clone())
         W_plain_q = q_baseline.quantize(weight_mat_original)
         Y_plain_q = X @ W_plain_q.T
