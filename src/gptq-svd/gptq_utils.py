@@ -24,7 +24,6 @@ class Quantizer:
 
     def quantize(self, weights):
         # assumes q is of shape (m, 1) or (m, n)
-        print(f"Weights size: {weights.shape}, scale size: {self.scale.shape}")
         q = torch.round(torch.clamp(weights / self.scale, min=self.min_val, max=self.max_val))
         return q * self.scale
 
@@ -113,7 +112,7 @@ def gptq_ref_fwrd(
         for i in range(count):
             w = W1[:, i]
             d = Hinv1[i, i]
-            q = quantizer.quantize(w)
+            q = quantizer.quantize(w.unflatten(1)).flatten()
             print(f"Shapes: w: {w.shape}, q: {q.shape}, Q1[:,i]: {Q1[:, i].shape}")
             Q1[:, i] = q.flatten()
             Losses1[:, i] = (w - q) ** 2 / d ** 2
