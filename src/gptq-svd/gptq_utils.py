@@ -254,8 +254,8 @@ if __name__ == '__main__':
     torch.manual_seed(0)
 
     num_samples = 1024 * 32
-    n = 512
-    m = 512
+    n = 2048
+    m = 2048
     device = torch.device("cuda")
     dtype = torch.float32
     # X = torch.randn(num_samples, n, device=device, dtype=dtype)
