@@ -278,14 +278,14 @@ if __name__ == '__main__':
         q = Quantizer(per_channel=True, w_bits=4)
 
         gptq_svd_fwrd(
-                sketch_dim=32,
-                oversample=32,
-                k_iter=5,
+                sketch_dim=4*n,
+                oversample=0,
+                k_iter=2,
                 make_stream=make_stream,
                 weight_mat=weight_mat,
                 out_weight=out_weight,
                 quantizer=q,
-                eps=1e-8
+                eps=1e-1
                 )
         Y_quant_svd = X @ out_weight.T
 
