@@ -1,6 +1,6 @@
 import torch
 import jax
-import math
+import itertools
 from jax.dlpack import from_dlpack
 import gc
 
