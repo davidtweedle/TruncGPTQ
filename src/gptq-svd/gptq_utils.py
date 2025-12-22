@@ -310,7 +310,8 @@ def run_tuning_grid(
     def expand_grid(grid):
         keys, values = zip(*grid.items())
         return [dict(zip(keys, v)) for v in itertools.product(*values)]
-    configs = expand_grid(param_grid_main) + expand_grid(param_grid_test)
+    # configs = expand_grid(param_grid_main) + expand_grid(param_grid_test)
+    configs = expand_grid(param_grid_test)
 
     results = []
     print(f"Total configurations: {len(configs)}")
