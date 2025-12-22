@@ -128,8 +128,6 @@ def gptq_ref_fwrd(
 
 def gptq_svd_fwrd_test(
         sketch_dim,
-        oversample,
-        k_iter,
         make_stream,
         weight_mat,
         out_weight,
@@ -140,8 +138,9 @@ def gptq_svd_fwrd_test(
     device = weight_mat.device
     dtype = weight_mat.dtype
     B = torch.zeros(sketch_dim, n, device=device, dtype=dtype)
-    for chunk in make_stream:
-        R = torch.randn(sketch_dim, m, device=device, dtype=dtype)
+    for chunk in make_stream():
+        bsz = chunk.shape[0]
+        R = torch.randn(sketch_dim, bsz, device=device, dtype=dtype)
         B += R @ chunk
     # first compute sketch of input_stream
     U_tilde, S, Vh = torch.linalg.svd(B, full_matrices=False)
@@ -172,7 +171,6 @@ def gptq_svd_fwrd_test(
         out_weight[:, j: j + 1] = q_j
 
     out_weight[:, mask] = quantizer.quantize(W[:, mask])
-
 
 
 def gptq_svd_fwrd(
@@ -283,6 +281,102 @@ def make_X(
     raise ValueError(f"Unknown mode: {mode}")
 
 
+def run_tuning_grid(
+        n_samples=2048,
+        n=1024,
+        m=1024,
+        device="cuda"
+        ):
+    print(f"--- Starting hyperparam tuning (N={n}, M={m}) ---")
+    dtype = torch.float32
+    X = make_X(n_samples, n, mode="gaussian_corr", rho=0.9, nu=3.0, device=device, dtype=dtype)
+    W = torch.randn(m, n device=device, dtype=dtype)
+
+    Y_true = X @ W.T
+    norm_Y_true = torch.norm(Y_true)
+    param_grid_main = {
+            'sketch_ratio': [0.1, 0.5, 1.0, 2.0],
+            'k_iter': [0, 1, 2, 5],
+            'eps': [1e-1, 1e-2, 1e-4, 1e-8],
+            'oversample': [16],
+            'test_sketch': [False]
+            }
+    param_grid_test = {
+            'sketch_ratio': [0.1, 0.5, 1.0, 2.0],
+            'eps': [1e-1, 1e-2, 1e-4, 1e-8],
+            'test_sketch': [True]
+            }
+
+    def expand_grid(grid):
+        keys, values = zip(*grid.items())
+        return [dict(zip(keys, v)) for v in itertools.product(*values)]
+    configs = expand_grid(param_grid_main) + expand_grid(param_grid_test)
+
+    results = []
+    print(f"Total configurations: {len(configs)}")
+
+    for i, cfg in enumerate(configs):
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        sketch_dim = int(n * cfg['sketch_ratio'])
+
+        out_weight = torch.zeros_like(W)
+        quantizer = Quantizer(per_channel=True, w_bits=4)
+        batch_size = 512
+        def make_stream():
+            for i in range(0, n_samples, batch_size):
+                yield X[i : i + batch_size]
+
+        try:
+            if cfg['test_sketch']:
+                gptq_svd_fwrd_test(
+                        sketch_dim=sketch_dim,
+                        make_stream=make_stream,
+                        weight_mat=W,
+                        out_weight=out_weight,
+                        quantizer=quantizer,
+                        eps=cfg['eps']
+                        )
+            else:
+                gptq_svd_fwrd(
+                        sketch_dim=sketch_dim,
+                        oversample=cfg['oversample'],
+                        k_iter=cfg['k_iter'],
+                        make_stream=make_stream,
+                        weight_mat=W,
+                        out_weight=out_weight,
+                        quantizer=quantizer,
+                        eps=cfg['eps']
+                        )
+            Y_quant = X @ out_weight.T
+            diff = Y_true - Y_quant
+            rel_err = torch.norm(diff) / norm_Y_true
+            res = cfg.copy()
+            res['rel_err'] = rel_err.item()
+            res['sketch_dim'] = sketch_dim
+            results.append(res)
+
+            print(f"Config: {cfg} | Rel Err: {rel_err.item():.5e}")
+        except Exception as e:
+            print(f"Config {cfg} failed: {e}")
+
+    print(f"\n--- Tuning complete ---")
+    results.sort(key=lambda x: x['rel_err'])
+    header = f"{'Method':<6} | {'Ratio':<6} | {'k_iter':<6} | {'eps':<8} | {'Rel Error':<12}"
+    print("-" * len(header))
+    print(header)
+    for r in results[:5]:
+        method = "TEST" if r['test_sketch'] else "MAIN"
+        k_val = r.get('k_iter', '-')
+        print(f"{method:<6} | {r['sketch_ratio']:<6} | {k_val}:<6} | {r['eps']:<8} | {r['rel_err']:.5e}")
+
+    return results
+
+
+
+
+
 
     # notes -- B = Q.T @ X -- d by n
     # U ~ Q @ U_tilde
@@ -298,7 +392,7 @@ def make_X(
     # X_R = Q U_tilde Up Sp Vp.T
     # delta = (v1 - q) Vp Sp^{-1} Up.T U_tilde.T B[col]
 
-if __name__ == '__main__':
+def experiment():
     torch.manual_seed(0)
 
     num_samples = 1024 * 32
@@ -392,3 +486,7 @@ if __name__ == '__main__':
         del max_err_plain, w_rel_plain
         gc.collect()
         torch.cuda.empty_cache()
+
+if __name__ == "__main__":
+    torch.manual_seed(42)
+    best_results = run_tuning_grid(n_samples=2048, n=1024, m=1024)
