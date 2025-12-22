@@ -126,6 +126,54 @@ def gptq_ref_fwrd(
     print(f"Average loss: {avg_loss}")
 
 
+def gptq_svd_fwrd_test(
+        sketch_dim,
+        oversample,
+        k_iter,
+        make_stream,
+        weight_mat,
+        out_weight,
+        quantizer,
+        eps,
+        ):
+    m, n = weight_mat.shape
+    device = weight_mat.device
+    dtype = weight_mat.dtype
+    B = torch.zeros(sketch_dim, n, device=device, dtype=dtype)
+    for chunk in make_stream:
+        R = torch.randn(sketch_dim, m, device=device, dtype=dtype)
+        B += R @ chunk
+    # first compute sketch of input_stream
+    U_tilde, S, Vh = torch.linalg.svd(B, full_matrices=False)
+    threshold = eps * S[0]
+    d = torch.count_nonzero(S >= threshold)
+    U_tilde, S, Vh = U_tilde[:, :d], S[:d], Vh[:d]
+
+    SVh = torch.diag(S) @ Vh
+    SVh_jax = from_dlpack(SVh)
+    _, _, P_jax = jax.scipy.linalg.qr(SVh_jax, pivoting=True, mode='economic')
+    P = torch.from_dlpack(P_jax)
+    W = weight_mat.clone()
+    quantizer.init_scale(W)
+    mask = torch.ones(n, dtype=bool, device=device)
+    for i in range(d):
+        j = P[i]
+        mask[j] = False
+        SVh_mask = SVh[:, mask]
+        Up, Sp, Vph = torch.linalg.svd(SVh_mask, full_matrices=False)
+        q_j = quantizer.quantize(W[:, j: j + 1])
+        u_j = U_tilde.T @ B[:, j]
+        c = Up.T @ u_j
+        c_scaled = c / Sp
+        delta_mask = (W[:, j: j + 1] - q_j) * (Vph.T @ c_scaled)
+        full_delta = torch.zeros_like(W)
+        full_delta[:, mask] = delta_mask
+        W += full_delta.to(dtype)
+        out_weight[:, j: j + 1] = q_j
+
+    out_weight[:, mask] = quantizer.quantize(W[:, mask])
+
+
 
 def gptq_svd_fwrd(
         sketch_dim,
@@ -152,10 +200,10 @@ def gptq_svd_fwrd(
             )
     # B = B.to(torch.float32)
     U_tilde, S, Vh = torch.linalg.svd(B, full_matrices=False)
-    d = torch.count_nonzero(S >= eps)
+    threshold = S[0] * eps
+    d = torch.count_nonzero(S >= threshold)
     U_tilde, S, Vh = U_tilde[:, :d], S[:d], Vh[:d]
 
-    
     SVh = torch.diag(S) @ Vh
     SVh_jax = from_dlpack(SVh)
     _, _, P_jax = jax.scipy.linalg.qr(SVh_jax, pivoting=True, mode='economic')
