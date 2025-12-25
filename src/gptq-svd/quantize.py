@@ -6,7 +6,9 @@ import model_utils
 import eval_utils
 from gptq_utils import gptq_svd_fwrd, Quantizer
 
+
 def main():
+    print(f"Starting quantization")
     args = utils.get_args()
     torch.manual_seed(args.seed)
     model, tokenizer = model_utils.get_model(args.model_id, args.device)
