@@ -51,6 +51,11 @@ def capture_initial_inputs(model, input_ids_list, device="cuda"):
             cache['attention_mask'] = kwargs.get('attention_mask')
             cache['position_ids'] = kwargs.get('position_ids')
             raise ValueError("Stop forward")
+        def __getattr__(self, name):
+            try:
+                return super().__getattr__(name)
+            except AttributeError:
+                return getattr(self.module, name)
 
     layers[0] = Catcher(layers[0])
     for batch in input_ids_list:
