@@ -90,11 +90,11 @@ def main():
         inps, outs = outs, inps
         torch.cuda.empty_cache()
 
-        print(f"Saving model to {args.save_path}...")
-        model.save_pretrained(args.save_path)
-        tokenizer.save_pretrained(args.save_path)
+    print(f"Saving model to {args.save_path}...")
+    model.save_pretrained(args.save_path)
+    tokenizer.save_pretrained(args.save_path)
 
-        eval_utils.evaluate_perplexity(model, tokenizer, device=args.device)
+    eval_utils.evaluate_perplexity(model, tokenizer, device=args.device)
 
-    if __name__ == "__main__":
-        main()
+if __name__ == "__main__":
+    main()
