@@ -51,7 +51,13 @@ def capture_initial_inputs(model, input_ids_list, device="cuda"):
             inps[cache['i']] = inp.to('cpu')
             cache['i'] += 1
             if cache['layer_kwargs'] is None:
-                cache['layer_kwargs'] = {k: v for k, v in kwargs.items()}
+                params = {}
+                for k, v in kwargs.items():
+                    if isinstance(v, torch.Tensor):
+                        params[k] = v.to("cpu")
+                    else:
+                        params[k] = v
+                cache['layer_kwargs'] = params
             raise ValueError("Stop forward")
 
         def __getattr__(self, name):
@@ -61,8 +67,9 @@ def capture_initial_inputs(model, input_ids_list, device="cuda"):
                 return getattr(self.module, name)
 
     layers[0] = Catcher(layers[0])
+    model_device = next(model.parameters()).device
     for batch in input_ids_list:
-        batch = batch.to(device)
+        batch = batch.to(model_device)
         try:
             model(batch)
         except ValueError:
