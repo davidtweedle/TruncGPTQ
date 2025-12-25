@@ -47,6 +47,9 @@ def main():
                 for k, v in layer_kwargs.items():
                     if isinstance(v, torch.Tensor):
                         batch_kwargs[k] = v.to(args.device)
+                    elif isinstance(v, (tuple, list)):
+                        moved_list = [x.to(args.device) if isinstance(x, torch.Tensor) else x for x in v ]
+                        batch_kwargs[k] = tuple(moved_list) if isinstance(v, tuple) else moved_list
                     else:
                         batch_kwargs[k] = v
             with torch.no_grad():
@@ -65,9 +68,8 @@ def main():
             sketch_dim = int(n * args.sketch_ratio)
 
             def make_stream_adapter():
-                for x_chunk in X_list:
-                    yield x_chunk.to(torch.float32)
-            
+                for x_chunk_cpu in X_list:
+                    yield x_chunk_cpu.to(args.device, dtype=torch.float32)
             out_weight = torch.zeros_like(W)
             quantizer = Quantizer(per_channel=True, w_bits=args.w_bits)
 
@@ -93,6 +95,9 @@ def main():
                 for k, v in layer_kwargs.items():
                     if isinstance(v, torch.Tensor):
                         batch_kwargs[k] = v.to(args.device)
+                    elif isinstance(v, (tuple, list)):
+                        moved_list = [x.to(args.device) if isinstance(x, torch.Tensor) else x for x in v]
+                        batch_kwargs[k] = tuple(moved_list) if isinstance(v, tuple) else moved_list
                     else:
                         batch_kwargs[k] = v
             with torch.no_grad():
