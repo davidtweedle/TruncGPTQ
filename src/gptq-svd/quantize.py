@@ -4,6 +4,7 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
 import gc
+import jax
 import utils
 import data_utils
 import model_utils
@@ -14,6 +15,8 @@ from gptq_utils import gptq_svd_fwrd, Quantizer
 def cleanup():
     gc.collect()
     torch.cuda.empty_cache()
+    jax.clear_backends()
+    torch.cuda.synchronize()
 
 
 def main():
@@ -27,7 +30,7 @@ def main():
     if next(model.parameters()).device.type != 'cpu':
         print("Warning: Model on GPU. Moving to CPU to save VRAM.")
         model.to("cpu")
-        cleanup()
+    cleanup()
 
     input_ids_list = data_utils.get_loaders(args.dataset, tokenizer, args.n_samples, args.seq_len)
 
@@ -58,7 +61,6 @@ def main():
 
     for i, layer in enumerate(layers):
         print(f"Processing Layer {i}/{len(layers)}...")
-        layer = layer.to(args.device)
 
         groups = model_utils.get_sequenced_groups(layer)
 
@@ -70,14 +72,14 @@ def main():
                 submodule = get_submodule(layer, name)
                 handles.append(submodule.register_forward_hook(add_batch(name)))
             for j in range(args.n_samples):
-                inp_batch = inps[j].to(args.device, non_blocking=True).unsqueeze(0)
+                inp_batch = inps[j].unsqueeze(0)
                 batch_kwargs = {}
                 if layer_kwargs:
                     for k, v in layer_kwargs.items():
                         if isinstance(v, torch.Tensor):
-                            batch_kwargs[k] = v.to(args.device, non_blocking=True)
+                            batch_kwargs[k] = v.to("cpu")
                         elif isinstance(v, (tuple, list)):
-                            moved_list = [x.to(args.device, non_blocking=True) if isinstance(x, torch.Tensor) else x for x in v ]
+                            moved_list = [x.to("cpu") if isinstance(x, torch.Tensor) else x for x in v ]
                             batch_kwargs[k] = tuple(moved_list) if isinstance(v, tuple) else moved_list
                         else:
                             batch_kwargs[k] = v
@@ -94,7 +96,7 @@ def main():
                     continue
                 X_list = layer_inputs[name]
                 submodule = get_submodule(layer, name)
-                W = submodule.weight.data.float()
+                W = submodule.weight.data.float().to(args.device)
                 m, n = W.shape
                 sketch_dim = int(n * args.sketch_ratio)
 
@@ -122,26 +124,21 @@ def main():
                 cleanup()
             layer_inputs.clear()
             cleanup()
-            layer = layer.to("cpu")
-            cleanup()
-            layer = layer.to(args.device)
         for j in range(args.n_samples):
-            inp_batch = inps[j].to(args.device, non_blocking=True).unsqueeze(0)
+            inp_batch = inps[j].unsqueeze(0)
             batch_kwargs = {}
             if layer_kwargs:
                 for k, v in layer_kwargs.items():
                     if isinstance(v, torch.Tensor):
-                        batch_kwargs[k] = v.to(args.device, non_blocking=True)
+                        batch_kwargs[k] = v.to("cpu")
                     elif isinstance(v, (tuple, list)):
-                        moved_list = [x.to(args.device, non_blocking=True) if isinstance(x, torch.Tensor) else x for x in v]
+                        moved_list = [x.to("cpu") if isinstance(x, torch.Tensor) else x for x in v]
                         batch_kwargs[k] = tuple(moved_list) if isinstance(v, tuple) else moved_list
                     else:
                         batch_kwargs[k] = v
             batch_kwargs['use_cache'] = False
-            outs[j] = layer(inp_batch, **batch_kwargs)[0].to("cpu", non_blocking=True)
-            del inp_batch, batch_kwargs
+            outs[j] = layer(inp_batch, **batch_kwargs)[0]
         inps, outs = outs, inps
-        layer = layer.to("cpu")
         cleanup()
 
     print(f"Saving model to {args.save_path}...")
