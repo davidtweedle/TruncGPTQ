@@ -208,7 +208,7 @@ def gptq_svd_fwrd(
     _, _, P_jax = jax.scipy.linalg.qr(SVh_jax, pivoting=True, mode='economic')
     P = torch.from_dlpack(P_jax)
     del SVh_jax, P_jax
-    jax.clear_backends()
+    jax.clear_caches()
     W = weight_mat.clone()
     quantizer.init_scale(W)
     mask = torch.ones(n, dtype=bool, device=device)

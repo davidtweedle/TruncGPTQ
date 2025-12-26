@@ -15,7 +15,7 @@ from gptq_utils import gptq_svd_fwrd, Quantizer
 def cleanup():
     gc.collect()
     torch.cuda.empty_cache()
-    jax.clear_backends()
+    jax.clear_caches()
     torch.cuda.synchronize()
 
 
