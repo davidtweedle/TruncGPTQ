@@ -26,6 +26,26 @@ def get_layers(model):
         return model.layers
     raise ValueError("Could not find layers in model architecture")
 
+def get_sequenced_groups(layer):
+    groups = []
+    layer_modules = {name: m for name, m in layer.named_modules()}
+    g1 = [n for n in ['self_attn.q_proj', 'self_attn.k_proj', 'self_attn.v_proj'] if n in layer_modules]
+    if g1:
+        groups.append(g1)
+    g2 = [n for n in ['self_attn.o_proj'] if n in layer_modules]
+    if g2:
+        groups.append(g2)
+
+    g3 = [n for n in ['mlp.gate_proj', 'mlp.up_proj'] if n in layer_modules]
+    if g3:
+        groups.append(g3)
+
+    g4 = [n for n in ['mlp.down_proj'] if n in layer_modules]
+    if g4:
+        groups.append(g4)
+
+    return groups
+
 def find_linear_layers(module):
     res = {}
     for name, m in module.named_modules():
