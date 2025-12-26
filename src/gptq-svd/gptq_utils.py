@@ -212,13 +212,13 @@ def gptq_svd_fwrd(
     mask = torch.ones(n, dtype=bool, device=device)
     for i in range(0, d, update_block_size):
         end_idx = min(i + update_block_size, d)
-        cur_cols = P[i : end_idx]
+        cur_cols = P[i: end_idx]
         mask[cur_cols] = False
-        SVh_mask = Svh[:, mask]
+        SVh_mask = SVh[:, mask]
         Up, Sp, Vph = torch.linalg.svd(SVh_mask, full_matrices=False)
         w_block = W[:, cur_cols]
         q_block = quantizer.quantize(w_block)
-        out_weight[:, current_cols] = q_block
+        out_weight[:, cur_cols] = q_block
         err_block = w_block - q_block
         u_block = U_tilde.T @ B[:, cur_cols]
         c = Up.T @ u_block
@@ -228,6 +228,7 @@ def gptq_svd_fwrd(
         W[:, mask] += delta.to(dtype)
 
     out_weight[:, mask] = quantizer.quantize(W[:, mask])
+
 
 def make_ar1_cholesky(n, rho=0.9, device="cuda", dtype=torch.float32):
     idx = torch.arange(n, device=device)
