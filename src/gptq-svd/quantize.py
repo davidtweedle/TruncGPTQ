@@ -100,7 +100,7 @@ def main():
                     out_weight=out_weight,
                     quantizer=quantizer,
                     eps=args.eps,
-                    block_update_size=64
+                    update_block_size=64
                     )
 
             submodule.weight.copy_(out_weight)
