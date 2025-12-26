@@ -1,3 +1,6 @@
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import torch
 import gc
 import utils
@@ -7,11 +10,22 @@ import eval_utils
 from gptq_utils import gptq_svd_fwrd, Quantizer
 
 
+def cleanup():
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
 def main():
     print(f"Starting quantization")
     args = utils.get_args()
     torch.manual_seed(args.seed)
+    cleanup()
     model, tokenizer = model_utils.get_model(args.model_id, args.device)
+    if next(model.parameters()).device.type != 'cpu':
+        print("Warning: Model on GPU. Moving to CPU to save VRAM.")
+        model.to("cpu")
+        cleanup()
+
     input_ids_list = data_utils.get_loaders(args.dataset, tokenizer, args.n_samples, args.seq_len)
 
     inps, outs, layer_kwargs = model_utils.capture_initial_inputs(
@@ -20,6 +34,7 @@ def main():
     layers = model_utils.get_layers(model)
 
     layer_inputs = {}
+
     def add_batch(name):
         def hook(module, input, output):
             inp = input[0].detach()
@@ -52,6 +67,7 @@ def main():
                         batch_kwargs[k] = tuple(moved_list) if isinstance(v, tuple) else moved_list
                     else:
                         batch_kwargs[k] = v
+            batch_kwargs["use_cache"] = False
             with torch.no_grad():
                 layer(inp_batch, **batch_kwargs)
         for h in handles:
@@ -87,7 +103,7 @@ def main():
             submodule.weight.copy_(out_weight)
 
             del X_list, layer_inputs[name]
-            gc.collect()
+            cleanup()
         for j in range(args.n_samples):
             inp_batch = inps[j].to(args.device).unsqueeze(0)
             batch_kwargs = {}
@@ -100,11 +116,12 @@ def main():
                         batch_kwargs[k] = tuple(moved_list) if isinstance(v, tuple) else moved_list
                     else:
                         batch_kwargs[k] = v
+            batch_kwargs['use_cache'] = False
             with torch.no_grad():
                 outs[j] = layer(inp_batch, **batch_kwargs)[0].to("cpu")
         inps, outs = outs, inps
         layer = layer.to("cpu")
-        torch.cuda.empty_cache()
+        cleanup()
 
     print(f"Saving model to {args.save_path}...")
     model.save_pretrained(args.save_path)
