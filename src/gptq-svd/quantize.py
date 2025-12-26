@@ -19,7 +19,9 @@ def main():
     print(f"Starting quantization")
     args = utils.get_args()
     torch.manual_seed(args.seed)
+    torch.set_grad_enabled(False)
     cleanup()
+
     model, tokenizer = model_utils.get_model(args.model_id, args.device)
     if next(model.parameters()).device.type != 'cpu':
         print("Warning: Model on GPU. Moving to CPU to save VRAM.")
@@ -68,8 +70,7 @@ def main():
                     else:
                         batch_kwargs[k] = v
             batch_kwargs["use_cache"] = False
-            with torch.no_grad():
-                layer(inp_batch, **batch_kwargs)
+            layer(inp_batch, **batch_kwargs)
         for h in handles:
             h.remove()
 
@@ -100,8 +101,7 @@ def main():
                     eps=args.eps
                     )
 
-            with torch.no_grad():
-                submodule.weight.copy_(out_weight)
+            submodule.weight.copy_(out_weight)
 
             del X_list, layer_inputs[name]
             cleanup()
@@ -118,8 +118,7 @@ def main():
                     else:
                         batch_kwargs[k] = v
             batch_kwargs['use_cache'] = False
-            with torch.no_grad():
-                outs[j] = layer(inp_batch, **batch_kwargs)[0].to("cpu")
+            outs[j] = layer(inp_batch, **batch_kwargs)[0].to("cpu")
         inps, outs = outs, inps
         layer = layer.to("cpu")
         cleanup()
