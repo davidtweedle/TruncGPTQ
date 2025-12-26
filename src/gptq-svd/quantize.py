@@ -98,7 +98,8 @@ def main():
                     weight_mat=W,
                     out_weight=out_weight,
                     quantizer=quantizer,
-                    eps=args.eps
+                    eps=args.eps,
+                    block_update_size=64
                     )
 
             submodule.weight.copy_(out_weight)
