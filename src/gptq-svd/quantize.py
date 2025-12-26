@@ -48,71 +48,80 @@ def main():
             layer_inputs[name].append(inp_cpu)
         return hook
 
+    def get_submodule(root, name):
+        parts = name.split('.')
+        curr = root
+        for p in parts:
+            curr = getattr(curr, p)
+        return curr
+
     for i, layer in enumerate(layers):
         print(f"Processing Layer {i}/{len(layers)}...")
         layer = layer.to(args.device)
 
-        subset = model_utils.find_linear_layers(layer)
-        handles = []
-        for name in subset:
-            handles.append(subset[name].register_forward_hook(add_batch(name)))
+        groups = model_utils.get_sequenced_groups(layer)
 
-        for j in range(args.n_samples):
-            inp_batch = inps[j].to(args.device).unsqueeze(0)
-            batch_kwargs = {}
-            if layer_kwargs:
-                for k, v in layer_kwargs.items():
-                    if isinstance(v, torch.Tensor):
-                        batch_kwargs[k] = v.to(args.device)
-                    elif isinstance(v, (tuple, list)):
-                        moved_list = [x.to(args.device) if isinstance(x, torch.Tensor) else x for x in v ]
-                        batch_kwargs[k] = tuple(moved_list) if isinstance(v, tuple) else moved_list
-                    else:
-                        batch_kwargs[k] = v
-            batch_kwargs["use_cache"] = False
-            layer(inp_batch, **batch_kwargs)
-            del inp_batch, batch_kwargs
-        for h in handles:
-            h.remove()
-        cleanup()
+        for group_idx, group_names in enumerate(groups):
+            print(f"  -> Group {group_idx+1}: {group_names}")
 
-        new_weights_buffer = {}
+            handles = []
+            for name in group_names:
+                submodule = get_submodule(layer, name)
+                handles.append(submodule.register_forward_hook(add_batch(name)))
+            for j in range(args.n_samples):
+                inp_batch = inps[j].to(args.device).unsqueeze(0)
+                batch_kwargs = {}
+                if layer_kwargs:
+                    for k, v in layer_kwargs.items():
+                        if isinstance(v, torch.Tensor):
+                            batch_kwargs[k] = v.to(args.device)
+                        elif isinstance(v, (tuple, list)):
+                            moved_list = [x.to(args.device) if isinstance(x, torch.Tensor) else x for x in v ]
+                            batch_kwargs[k] = tuple(moved_list) if isinstance(v, tuple) else moved_list
+                        else:
+                            batch_kwargs[k] = v
+                batch_kwargs["use_cache"] = False
+                layer(inp_batch, **batch_kwargs)
+                del inp_batch, batch_kwargs
+            for h in handles:
+                h.remove()
+            for name in group_names:
+                print(f"Quantizing {name}")
+                if name not in layer_inputs or len(layer_inputs[name]) == 0:
+                    print(f"Warning: No inputs captured for {name}, skipping quantization")
+                    # should round to nearest
+                    continue
+                X_list = layer_inputs[name]
+                submodule = get_submodule(layer, name)
+                W = submodule.weight.data.float()
+                m, n = W.shape
+                sketch_dim = int(n * args.sketch_ratio)
 
-        for name, submodule in subset.items():
-            print(f"Quantizing {name}")
-            if name not in layer_inputs or len(layer_inputs[name]) == 0:
-                print(f"Warning: No inputs captured for {name}, skipping quantization")
-                # should round to nearest
-                continue
-            X_list = layer_inputs[name]
-            W = submodule.weight.data.float()
-            m, n = W.shape
-            sketch_dim = int(n * args.sketch_ratio)
+                def make_stream_adapter():
+                    for x_chunk_cpu in X_list:
+                        yield x_chunk_cpu.to(args.device, dtype=torch.float32)
+                out_weight = torch.zeros_like(W)
+                quantizer = Quantizer(per_channel=True, w_bits=args.w_bits)
 
-            def make_stream_adapter():
-                for x_chunk_cpu in X_list:
-                    yield x_chunk_cpu.to(args.device, dtype=torch.float32)
-            out_weight = torch.zeros_like(W)
-            quantizer = Quantizer(per_channel=True, w_bits=args.w_bits)
+                gptq_svd_fwrd(
+                        sketch_dim=sketch_dim,
+                        oversample=16,
+                        k_iter=args.k_iter,
+                        make_stream=make_stream_adapter,
+                        weight_mat=W,
+                        out_weight=out_weight,
+                        quantizer=quantizer,
+                        eps=args.eps,
+                        update_block_size=64
+                        )
 
-            gptq_svd_fwrd(
-                    sketch_dim=sketch_dim,
-                    oversample=16,
-                    k_iter=args.k_iter,
-                    make_stream=make_stream_adapter,
-                    weight_mat=W,
-                    out_weight=out_weight,
-                    quantizer=quantizer,
-                    eps=args.eps,
-                    update_block_size=64
-                    )
-
-            new_weights_buffer[name] = out_weight.to(submodule.weight.data.dtype).to("cpu")
-            del out_weight, W, quantizer
-            del X_list, layer_inputs[name]
+                new_weights_buffer[name] = out_weight.to(submodule.weight.data.dtype).to("cpu")
+                submodule.weight.copy_(out_weight)
+                del out_weight, W, quantizer
+                del X_list, layer_inputs[name]
+                cleanup()
+            layer_inputs.clear()
             cleanup()
-        layer_inputs.clear()
-        cleanup()
         layer = layer.to("cpu")
         cleanup()
         layer = layer.to(args.device)
@@ -133,9 +142,6 @@ def main():
             del inp_batch, batch_kwargs
         inps, outs = outs, inps
         layer = layer.to("cpu")
-        for name, new_weight in new_weights_buffer.items():
-            subset[name].weight.copy_(new_weight)
-        del new_weights_buffer
         cleanup()
 
     print(f"Saving model to {args.save_path}...")
