@@ -115,7 +115,6 @@ def main():
                         update_block_size=64
                         )
 
-                new_weights_buffer[name] = out_weight.to(submodule.weight.data.dtype).to("cpu")
                 submodule.weight.copy_(out_weight)
                 del out_weight, W, quantizer
                 del X_list, layer_inputs[name]
