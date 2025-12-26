@@ -75,6 +75,7 @@ def main():
             h.remove()
 
         for name, submodule in subset.items():
+            print(f"Quantizing {name}")
             if name not in layer_inputs or len(layer_inputs[name]) == 0:
                 print(f"Warning: No inputs captured for {name}, skipping quantization")
                 # should round to nearest
