@@ -1,8 +1,7 @@
 import os
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
-# os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
 import time
@@ -177,4 +176,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    torch.cuda.memory._record_memory_history(max_entries=100000)
+    try:
+        main()
+    except Exception as e:
+        print("Dumping memory snapshot")
+        torch.cuda.memory._dump_snapshot("oom_snapshot.pickle")
+        raise e
