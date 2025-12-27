@@ -65,6 +65,7 @@ def main():
 
     for i, layer in enumerate(layers):
         print(f"Processing Layer {i}/{len(layers)}...")
+        layer = layer.to(args.device)
 
         groups = model_utils.get_sequenced_groups(layer)
 
@@ -100,7 +101,7 @@ def main():
                     continue
                 X_list = layer_inputs[name]
                 submodule = get_submodule(layer, name)
-                W = submodule.weight.data.float().to(args.device)
+                W = submodule.weight.data.float()
                 m, n = W.shape
 
                 def make_stream_adapter():
@@ -119,7 +120,7 @@ def main():
                             out_weight=out_weight,
                             quantizer=quantizer,
                             eps=args.eps,
-                            update_block_size=256
+                            update_block_size=512
                             )
                 elif args.mode == "gptq":
                     gptq_ref_fwrd(
