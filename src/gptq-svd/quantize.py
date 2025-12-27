@@ -1,4 +1,5 @@
 import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 # os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
@@ -97,8 +98,7 @@ def main():
                 batch_kwargs["use_cache"] = False
                 out = layer(inp_batch, **batch_kwargs)
                 del inp_batch, batch_kwargs, out
-                if j % 50 == 0:
-                    gc.collect()
+                cleanup()
             for h in handles:
                 h.remove()
             cleanup()
@@ -159,6 +159,7 @@ def main():
                         batch_kwargs[k] = v
             batch_kwargs['use_cache'] = False
             outs[j] = layer(inp_batch, **batch_kwargs)[0].squeeze(0).to("cpu")
+            cleanup()
         inps, outs = outs, inps
         cleanup()
         log_mem(f"End Layer {i}")
