@@ -52,7 +52,7 @@ def main():
             inp = input[0].detach()
             if len(inp.shape) == 3:
                 inp = inp.squeeze(0)
-            inp_cpu = inp.cpu().clone()
+            inp_cpu = inp.detach().clone().cpu()
             if name not in layer_inputs:
                 layer_inputs[name] = []
             layer_inputs[name].append(inp_cpu)
@@ -95,10 +95,9 @@ def main():
                         else:
                             batch_kwargs[k] = v
                 batch_kwargs["use_cache"] = False
-                layer(inp_batch, **batch_kwargs)
-                del inp_batch, batch_kwargs
-                if j % 10 == 0:
-                    torch.cuda.empty_cache()
+                out = layer(inp_batch, **batch_kwargs)
+                del inp_batch, batch_kwargs, out
+                cleanup()
             for h in handles:
                 h.remove()
             for name in group_names:
