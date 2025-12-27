@@ -37,42 +37,19 @@ def streaming_sketch(
         device=None,
         dtype=None
         ):
-    if device is None or dtype is None:
-        first_batch = next(make_stream())
-        device = first_batch.device
-        dtype = first_batch.dtype
-
-    d_eff = d + oversample
-    R = torch.randn(n, d_eff, dtype=dtype, device=device)
-
-    def apply_X(B):
-        Y_parts = []
-        for chunk in make_stream():
-            Y_parts.append(chunk @ B)
-        return torch.cat(Y_parts, dim=0)
-
-    def apply_XT(Y):
-        Z = torch.zeros(n, Y.shape[1], device=device, dtype=dtype)
-        start = 0
-        for chunk in make_stream():
-            b = chunk.shape[0]
-            Y_chunk = Y[start : start + b]
-            Z += chunk.T @ Y_chunk
-            start += b
-        return Z
-
-    Y = torch.linalg.qr(apply_X(R), mode='reduced').Q
-    for _ in range(k_iter):
-        Z = apply_XT(Y)
-        Y = torch.linalg.qr(apply_X(Z), mode='reduced').Q
-    B = torch.zeros(Y.shape[1], n, device=device, dtype=dtype)
-    start = 0
+    sketch_dim = d
+    hidden_dim = n
+    Y = torch.zeros((sketch_dim, hidden_dim), device=device, dtype=dtype)
+    scale = 1.0 / math.sqrt(sketch_dim)
     for chunk in make_stream():
-        b = chunk.shape[0]
-        Q_chunk = Y[start : start + b]
-        B += Q_chunk.T @ chunk
-        start += b
-    return B, Y
+        b_size = chunk.shape[0]
+        chunk = chunk.to(device, dtype=dtype)
+
+        Omega_batch = torch.randn((sketch_dim, b_size), device=device, dtype=dtype) * scale
+        Y.addmm_(Omega_batch, chunk)
+        del chunk, Omega_batch
+    return Y, None
+
 
 def gptq_ref_fwrd(
         make_stream,
@@ -222,14 +199,18 @@ def gptq_svd_fwrd(
         q_block = quantizer.quantize(w_block)
         out_weight[:, cur_cols] = q_block
         err_block = w_block - q_block
-        u_block = U_tilde.T @ B[:, cur_cols]
+        # u_block = U_tilde.T @ B[:, cur_cols]
+        u_block = Svh[:, cur_cols]
         c = Up.T @ u_block
         c_scaled = c / Sp.unsqueeze(1)
         K = Vph.T @ c_scaled
         delta = err_block @ K.T
         W[:, mask] += delta.to(dtype)
+        del Up, Sp, Vph, c, c_scaled, K, delta
 
     out_weight[:, mask] = quantizer.quantize(W[:, mask])
+    del B, W, mask, SVh, S, Vh, P, U_tilde
+    torch.cuda.empty_cache()
 
 
 def make_ar1_cholesky(n, rho=0.9, device="cuda", dtype=torch.float32):
