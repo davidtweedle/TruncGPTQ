@@ -96,8 +96,8 @@ def capture_initial_inputs(model, input_ids_list, device="cuda"):
 
     layers[0] = Catcher(layers[0])
     model_device = next(model.parameters()).device
-    for batch in input_ids_list:
-        print(f"Batch shape: {batch.shape}")
+    for i, batch in enumerate(input_ids_list):
+        print(f"Item: {i}, Batch shape: {batch.shape}")
         batch = batch.to(model_device)
         try:
             model(batch)
