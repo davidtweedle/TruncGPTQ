@@ -52,7 +52,7 @@ def main():
             inp = input[0].detach()
             if len(inp.shape) == 3:
                 inp = inp.squeeze(0)
-            inp_cpu = inp.to("cpu", non_blocking=True)
+            inp_cpu = inp.cpu().clone()
             if name not in layer_inputs:
                 layer_inputs[name] = []
             layer_inputs[name].append(inp_cpu)
