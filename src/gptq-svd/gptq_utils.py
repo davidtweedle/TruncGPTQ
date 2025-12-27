@@ -65,8 +65,10 @@ def gptq_ref_fwrd(
     n_samples = 0
     for X in make_stream():
         chunk_samples = X.shape[0]
+        X = X.to(device, dtype)
         H = H * (n_samples) / (n_samples + chunk_samples) + (1/ (n_samples + chunk_samples)) * X.T @ X
         n_samples += chunk_samples
+        del X
     percdamp = 0.01
     diag = H.diagonal()
     mean = torch.mean(diag)
@@ -101,6 +103,7 @@ def gptq_ref_fwrd(
     avg_loss = torch.sum(Losses).item() / n_samples
     print(f"Losses sum item: {torch.sum(Losses).item()}")
     print(f"Average loss: {avg_loss}")
+    torch.cuda.empty_cache()
 
 
 def gptq_svd_fwrd_test(
@@ -200,7 +203,7 @@ def gptq_svd_fwrd(
         out_weight[:, cur_cols] = q_block
         err_block = w_block - q_block
         # u_block = U_tilde.T @ B[:, cur_cols]
-        u_block = Svh[:, cur_cols]
+        u_block = SVh[:, cur_cols]
         c = Up.T @ u_block
         c_scaled = c / Sp.unsqueeze(1)
         K = Vph.T @ c_scaled

@@ -17,5 +17,6 @@ def get_args():
     parser.add_argument("--k_iter", type=int, default=0, help="Power iterations for randomized SVD")
     parser.add_argument("--eps", type=float, default=1e-2, help="Singular value truncation threshold")
     parser.add_argument("--save_path", type=str, default="./quantized_model", help="Path to save output")
+    parser.add_argument("--mode", type=str, choices=["svd", "gptq", "baseline"], default="svd")
 
     return parser.parse_args()
