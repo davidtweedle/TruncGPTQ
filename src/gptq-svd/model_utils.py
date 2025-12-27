@@ -8,7 +8,7 @@ def get_model(model_id, device="cuda"):
     model = AutoModelForCausalLM.from_pretrained(
             model_id,
             dtype=torch.float16,
-            device_map="cpu",
+            device_map=device,
             trust_remote_code=True,
             low_cpu_mem_usage=True
             )
@@ -59,7 +59,7 @@ def capture_initial_inputs(model, input_ids_list, device="cuda"):
     seq_len = input_ids_list[0].shape[1]
     hidden_dim = model.config.hidden_size
 
-    inps = torch.zeros((n_samples, seq_len, hidden_dim), dtype=torch.float16, device='cpu')
+    inps = torch.zeros((n_samples, seq_len, hidden_dim), dtype=torch.float16, device=device)
     cache = {'i': 0, 'layer_kwargs': None}
 
     class Catcher(nn.Module):
@@ -68,13 +68,13 @@ def capture_initial_inputs(model, input_ids_list, device="cuda"):
             self.module = module
 
         def forward(self, inp, **kwargs):
-            inps[cache['i']] = inp.to('cpu')
+            inps[cache['i']] = inp
             cache['i'] += 1
             if cache['layer_kwargs'] is None:
                 params = {}
                 for k, v in kwargs.items():
                     if isinstance(v, torch.Tensor):
-                        params[k] = v.to("cpu")
+                        params[k] = v.to(device)
                     else:
                         params[k] = v
                 cache['layer_kwargs'] = params
