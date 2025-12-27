@@ -82,6 +82,7 @@ def main():
             for j in range(args.n_samples):
                 log_mem(f"Sample {j}")
                 inp_batch = inps[j].unsqueeze(0).to(args.device)
+                print(f"Shape {inp_batch.shape}")
                 batch_kwargs = {}
                 if layer_kwargs:
                     for k, v in layer_kwargs.items():
