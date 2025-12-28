@@ -37,6 +37,11 @@ def main():
     model.config.use_cache = False
     if not hasattr(model, "seqlen"):
         model.seqlen = 2048
+    
+    ppl_baseline = eval_utils.evaluate_perplexity(model, tokenizer, device=args.device)
+    print(f"Baseline PPL: {ppl_baseline:.2f}")
+    if args.mode == "baseline":
+        return
 
     input_ids_list = data_utils.get_loaders(args.dataset, tokenizer, args.n_samples, args.seq_len)
 
@@ -168,8 +173,6 @@ def main():
     tokenizer.save_pretrained(args.save_path)
 
     ppl_q = eval_utils.evaluate_perplexity(model, tokenizer, device=args.device)
-    ppl_baseline = eval_utils.evaluate_perplexity(model, tokenizer, device=args.device)
-    print(f"Baseline PPL: {ppl_baseline:.2f}")
     print(f"{args.mode.upper()} PPL: {ppl_q:.2f}")
 
 
