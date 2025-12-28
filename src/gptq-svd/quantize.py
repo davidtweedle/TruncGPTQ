@@ -33,19 +33,16 @@ def main():
     cleanup()
     print(f"Mode: {args.mode.upper()}")
 
-    log_mem("Pre-load")
     model, tokenizer = model_utils.get_model(args.model_id, args.device)
     model.config.use_cache = False
     if not hasattr(model, "seqlen"):
         model.seqlen = 2048
-    log_mem("Post-load")
 
     input_ids_list = data_utils.get_loaders(args.dataset, tokenizer, args.n_samples, args.seq_len)
 
     inps, outs, layer_kwargs = model_utils.capture_initial_inputs(
             model, input_ids_list, device="cpu"
             )
-    log_mem("Post-capture")
     layers = model_utils.get_layers(model)
 
     layer_inputs = {}
@@ -84,9 +81,7 @@ def main():
                 submodule = get_submodule(layer, name)
                 handles.append(submodule.register_forward_hook(add_batch(name)))
             for j in range(args.n_samples):
-                log_mem(f"Sample {j}")
                 inp_batch = inps[j].unsqueeze(0).to(args.device)
-                print(f"Shape {inp_batch.shape}")
                 batch_kwargs = {}
                 if layer_kwargs:
                     for k, v in layer_kwargs.items():
@@ -166,7 +161,6 @@ def main():
             cleanup()
         inps, outs = outs, inps
         cleanup()
-        log_mem(f"End Layer {i}")
 
     print(f"Quantization finished in {time.time() - start_time:.2f}s")
     print(f"Saving model to {args.save_path}...")
