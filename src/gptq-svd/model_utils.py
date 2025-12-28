@@ -13,8 +13,6 @@ def get_model(model_id, device="cuda"):
             trust_remote_code=True,
             low_cpu_mem_usage=True
             )
-    if not hasattr(model, 'seqlen'):
-        model.seqlen = 2048
     return model, tokenizer
 
 def get_layers(model):

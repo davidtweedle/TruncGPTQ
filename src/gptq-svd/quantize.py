@@ -35,8 +35,10 @@ def main():
 
     log_mem("Pre-load")
     model, tokenizer = model_utils.get_model(args.model_id, args.device)
+    model.config.use_cache = False
+    if not hasattr(model, "seqlen"):
+        model.seqlen = 2048
     log_mem("Post-load")
-    print(model.config)
 
     input_ids_list = data_utils.get_loaders(args.dataset, tokenizer, args.n_samples, args.seq_len)
 
