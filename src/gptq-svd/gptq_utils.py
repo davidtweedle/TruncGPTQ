@@ -160,7 +160,8 @@ def gptq_svd_qr_fwrd(
         input_sketch,
         quantizer,
         threshold=1e-2,
-        permute_order=None
+        permute_order=None,
+        block_size=128
         ):
     out_features, in_features = weight_mat.shape
     device = weight_mat.device
@@ -186,19 +187,35 @@ def gptq_svd_qr_fwrd(
     W = weight_mat[:, perm]
     quantizer.init_scale(W)
     Q_W = torch.zeros_like(W)
-    for i in range(current_rank):
-        w_col = W[:, i]
-        q_col = quantizer.quantize(w_col.unsqueeze(1)).flatten()
-        Q_W[:, i] = q_col
-        error = w_col - q_col
-        diag = R[i, i]
-        if abs(diag) < 1e-6:
-            continue
-        if i + 1 < in_features:
-            R_row = R[i, i + 1:]
-            scaling = R_row / diag
-            delta = torch.outer(error, scaling)
-            W[:, i+1:] -= delta
+    for i in range(0, current_rank, block_size):
+        j = min(i + block_size, current_rank)
+        count = j - i
+        w_block = W[:, i:j]
+        q_block = torch.zeros_like(w_block)
+        R_block_diag = R[i:j, i:j]
+        for k in range(count):
+            w_col = w_block[:, k]
+            q_col = quantizer.quantize(w_col.unsqueeze(1)).flatten()
+            q_block[:, k] = q_col
+
+            error = w_col - q_col
+            diag = R_block_diag[k, k]
+            if abs(diag) < 1e-6:
+                continue
+            if k + 1 < count:
+                R_row_local = R_block_diag[k, k+1:]
+                scaling = R_row_local / diag
+                delta = torch.outer(error, scaling)
+                w_block[:, k + 1:] -= delta
+        Q_W[:, i:j] = q_block
+        if j < in_features:
+            E_block = w_block - q_block
+            R_cross = R[i:j, j:]
+            R_diags = torch.diagonal(R_block_diag)
+            Scale_Mat = R_cross / R_diags.unsqueeze(1)
+            Global_Delta = E_block @ Scale_Mat
+            W[:, j:] -= Global_Delta
+
     if current_rank < in_features:
         w_rem = W[:, current_rank:]
         Q_W[:, current_rank:] = quantizer.quantize(w_rem)
