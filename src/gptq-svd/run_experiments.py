@@ -11,7 +11,7 @@ DATASET = "wikitext2"
 BASE_SAVE_DIR = "experiments_dec28"
 param_grid = {
         "eps": [1e-2, 1e-4, 1e-6],
-        "sketch_ratio": [0.5, 1.0, 8.0]
+        "sketch_ratio": [0.03125, 0.5, 1.0, 8.0]
         }
 
 def run_command(cmd):
