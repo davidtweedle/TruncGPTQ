@@ -114,7 +114,7 @@ def main():
             handles = []
             for name in group_names:
                 submodule = get_submodule(layer, name)
-                handles.append(submodule.register_forward_hook(add_batch(name)))
+                handles.append(submodule.register_forward_hook(capture_hook(name)))
             for j in range(args.n_samples):
                 inp_batch = inps[j].unsqueeze(0).to(args.device)
                 batch_kwargs = {}
