@@ -44,10 +44,10 @@ def main():
     model.config.use_cache = False
     if not hasattr(model, "seqlen"):
         model.seqlen = args.seq_len
-    ppl_baseline = eval_utils.evaluate_perplexity(model, tokenizer, device=args.device)
-    print(f"Baseline PPL: {ppl_baseline:.2f}")
-    experiment_log["metrics"]["baseline_ppl"] = ppl_baseline
     if args.mode == "baseline":
+        ppl_baseline = eval_utils.evaluate_perplexity(model, tokenizer, device=args.device)
+        print(f"Baseline PPL: {ppl_baseline:.2f}")
+        experiment_log["metrics"]["baseline_ppl"] = ppl_baseline
         with open(f"{args.save_path}/log.json", "w") as f:
             json.dump(experiment_log, f, indent=4)
         return
