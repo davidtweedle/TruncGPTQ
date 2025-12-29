@@ -61,16 +61,7 @@ def main():
 
     layer_inputs = {}
 
-    def add_batch(name):
-        def hook(module, input, output):
-            inp = input[0].detach()
-            if len(inp.shape) == 3:
-                inp = inp.squeeze(0)
-            inp_cpu = inp.detach().clone().cpu()
-            if name not in layer_inputs:
-                layer_inputs[name] = []
-            layer_inputs[name].append(inp_cpu)
-        return hook
+    sketch_cache = {}
 
     def get_submodule(root, name):
         parts = name.split('.')
@@ -78,6 +69,35 @@ def main():
         for p in parts:
             curr = getattr(curr, p)
         return curr
+
+    def capture_hook(name):
+        def hook(module, input, output):
+            x = input[0].detach()
+            if x.dim() == 3:
+                x = x.reshape(1- ,x.shape[-1])
+            hidden_dim = x.shape[-1]
+
+            if args.mode == "svd":
+                if name not in sketch_cache:
+                    rank = int(hidden_dim * args.sketch_ratio)
+                    sketch_cache[name] = torch.zeros(
+                            (rank, hidden_dim),
+                            device=args.device,
+                            dtype=torch.float32
+                            )
+                Y = sketch_cache[name]
+                rank = Y.shape[0]
+                current_batch = x.shape[0]
+                scale = 1.0 / (rank ** 0.5)
+                omega = torch.randn((rank, current_batch), device=args.device, dtype=torch.float32) * scale
+                torch.addmm(input=Y, mat1=omega, mat2=x.to(args.device, torch.float32), beta=1.0, alpha=1.0, out=Y)
+            elif args.mode == "gptq":
+                x_cpu = x.cpu()
+                if name not in layer_inputs:
+                    layer_inputs[name] = []
+                layer_inputs[name].append(x_cpu)
+        return hook
+
     print(f"\n--- Starting {args.mode.upper()} Quantization ---")
     start_global = time.time()
 
@@ -122,41 +142,39 @@ def main():
                     print(f"Warning: No inputs captured for {name}, skipping quantization")
                     # should round to nearest
                     continue
-                X_list = layer_inputs[name]
                 submodule = get_submodule(layer, name)
                 W = submodule.weight.data.float()
                 m, n = W.shape
 
-                def make_stream_adapter():
-                    for x_chunk in X_list:
-                        yield x_chunk.to(args.device, torch.float32)
                 quantizer = Quantizer(per_channel=True, w_bits=args.w_bits)
                 module_stat = {"name": f"layer_{i}.{name}", "n_cols": n}
                 if args.mode == "svd":
-                    sketch_start = time.time()
-                    sketch_dim = int(n * args.sketch_ratio)
-                    Y_sketch = torch.zeros((sketch_dim, n), device=args.device, dtype=torch.float32)
-                    for x_chunk in make_stream_adapter():
-                        current_batch = x_chunk.shape[0]
-                        omega = torch.randn((sketch_dim, current_batch), device=args.device, dtype=torch.float32) / (sketch_dim ** 0.5)
-                        Y_sketch += omega @ x_chunk
-                        del omega, x_chunk
-                    module_stat["sketch_time"] = time.time() - sketch_start
+                    if name not in sketch_cache:
+                        print(f"Warning: No sketch for {name}")
+                        continue
+                    Y_sketch = sketch_cache[name]
                     solve_start = time.time()
                     final_W, used_rank = gptq_svd_qr_fwrd(
                             weight_mat=W,
                             input_sketch=Y_sketch,
                             quantizer=quantizer,
                             threshold=args.eps,
-                            permute_order=None
+                            permute_order=None,
+                            block_size=256
                             )
                     module_stat["solve_time"] = time.time() - solve_start
                     module_stat["rank_kept"] = used_rank
                     module_stat["rank_fraction"] = float(used_rank) / n
                     submodule.weight.copy_(final_W)
-                    del Y_sketch, final_W
+                    del Y_sketch, final_W, sketch_cache[name]
                 elif args.mode == "gptq":
+                    if name not in layer_inputs:
+                        continue
+                    X_list = layer_inputs[name]
                     out_weight = torch.zeros_like(W)
+                    def make_stream_adapter():
+                        for x_chunk in X_list:
+                            yield x_chunk.to(args.device, torch.float32)
                     gptq_ref_fwrd(
                             make_stream=make_stream_adapter,
                             weight_mat=W,
@@ -165,12 +183,12 @@ def main():
                             blocksize=128
                             )
                     submodule.weight.copy_(out_weight)
-                    del out_weight
+                    del out_weight, X_list, layer_inputs[name]
                 del W, quantizer
-                del X_list, layer_inputs[name]
                 experiment_log["layer_stats"].append(module_stat)
                 cleanup()
             layer_inputs.clear()
+            sketch_cache.clear()
             cleanup()
         for j in range(args.n_samples):
             inp_batch = inps[j].unsqueeze(0).to(args.device)
@@ -223,10 +241,10 @@ def main():
 
 
 if __name__ == "__main__":
-    torch.cuda.memory._record_memory_history(max_entries=100000)
     try:
         main()
     except Exception as e:
-        print("Dumping memory snapshot")
-        torch.cuda.memory._dump_snapshot("oom_snapshot.pickle")
+        print(f"CRASH: {e}")
+        with open("crash_log.json", "w") as f:
+            json.dump({"error": str(e)}, f)
         raise e
