@@ -188,7 +188,7 @@ def gptq_svd_qr_fwrd(
     Q_W = torch.zeros_like(W)
     for i in range(current_rank):
         w_col = W[:, i]
-        q_col = quantizer.quantize(w_col)
+        q_col = quantizer.quantize(w_col.unsqueeze(1)).flatten()
         Q_W[:, i] = q_col
         error = w_col - q_col
         diag = R[i, i]
