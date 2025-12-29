@@ -158,19 +158,21 @@ def gptq_svd_fwrd_test(
 @torch.compile(dynamic=True)
 def process_block_jit(w_block, R_block_diag, scale, min_val, max_val):
     count = w_block.shape[1]
+    error_block = torch.zeros_like(w_block)
     for k in range(count):
         w_col = w_block[:, k]
         w_scaled = w_col / scale
         w_clamped = torch.clamp(w_scaled, min=min_val, max=max_val)
         q_col = torch.round(w_clamped) * scale
-        error = w_col - q_col
+        current_error = w_col - q_col
+        error_block[:, k] = current_error
         diag = R_block_diag[k, k]
         if k + 1 < count:
             R_row_local = R_block_diag[k, k+1:]
             scaling = R_row_local / diag
             w_block[:, k+1:] -= torch.outer(error, scaling)
         w_block[:, k] = q_col
-    return w_block
+    return w_block, error_block
 
 def gptq_svd_qr_fwrd(
         weight_mat,
@@ -211,7 +213,7 @@ def gptq_svd_qr_fwrd(
         scale_tensor = quantizer.scale.squeeze()
         min_v = quantizer.min_val
         max_v = quantizer.max_val
-        w_block_quantized = process_block_jit(
+        w_block_quantized, E_block = process_block_jit(
                 w_block,
                 R_block_diag,
                 scale_tensor,
@@ -221,7 +223,6 @@ def gptq_svd_qr_fwrd(
 
         Q_W[:, i:j] = w_block_quantized
         if j < in_features:
-            E_block = w_block - w_block_quantized
             R_cross = R[i:j, j:]
             R_diags = torch.diagonal(R_block_diag)
             Scale_Mat = R_cross / R_diags.unsqueeze(1)
