@@ -74,7 +74,7 @@ def main():
         def hook(module, input, output):
             x = input[0].detach()
             if x.dim() == 3:
-                x = x.reshape(1- ,x.shape[-1])
+                x = x.reshape(-1, x.shape[-1])
             hidden_dim = x.shape[-1]
 
             if args.mode == "svd":
