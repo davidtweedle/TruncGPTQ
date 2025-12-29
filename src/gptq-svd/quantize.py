@@ -207,8 +207,8 @@ def main():
         print("Save successful.")
     except Exception as e:
         print(f"Standard save failed: {e}")
-        print(f"Fallback: Dumping state_dict...")
-        torch.save.model.state_dict(), os.path.join(args.save_path, "pytorch_model.bin"))
+        print("Fallback: Dumping state_dict...")
+        torch.save(model.state_dict(), os.path.join(args.save_path, "pytorch_model.bin"))
         model.config.save_pretrained(args.save_path)
 
     model.to(args.device)
