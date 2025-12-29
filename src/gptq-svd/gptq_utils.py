@@ -170,7 +170,7 @@ def process_block_jit(w_block, R_block_diag, scale, min_val, max_val):
         if k + 1 < count:
             R_row_local = R_block_diag[k, k+1:]
             scaling = R_row_local / diag
-            w_block[:, k+1:] -= torch.outer(error, scaling)
+            w_block[:, k+1:] -= torch.outer(current_error, scaling)
         w_block[:, k] = q_col
     return w_block, error_block
 
