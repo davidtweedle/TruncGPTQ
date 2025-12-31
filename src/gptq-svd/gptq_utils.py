@@ -41,7 +41,7 @@ def gptq_block_kernel(
         w_col = tl.sum(w_data * mask_k, axis=1)
         w_scaled = w_col / scales
         w_clamped = tl.clamp(w_scaled, float(MIN_VAL), float(MAX_VAL))
-        q_int = tl.extra.libdevice.rint(w_clamped)
+        q_int = tl.floor(w_clamped + 0.5)
         q_val = q_int * scales
         error = w_col - q_val
         e_out_ptrs = E_ptr + (offsets_rows * stride_e_row) + (k * stride_e_col)
