@@ -217,18 +217,21 @@ def main():
     experiment_log["metrics"]["total_time"] = total_duration
 
     print(f"Quantization finished in {total_duration:.2f}s")
-    print(f"Saving model to {args.save_path}...")
-    try:
-        model.cpu()
-        model.save_pretrained(args.save_path, safe_serialization=False)
-        tokenizer.save_pretrained(args.save_path)
-        print("Save successful.")
-    except Exception as e:
-        print(f"Standard save failed: {e}")
-        print("Fallback: Dumping state_dict...")
-        torch.save(model.state_dict(), os.path.join(args.save_path, "pytorch_model.bin"))
-        model.config.save_pretrained(args.save_path)
+    if not args.no_save:
+        print(f"Saving model to {args.save_path}...")
+        try:
+            model.cpu()
+            model.save_pretrained(args.save_path, safe_serialization=False)
+            tokenizer.save_pretrained(args.save_path)
+            print("Save successful.")
+        except Exception as e:
+            print(f"Standard save failed: {e}")
+            print("Fallback: Dumping state_dict...")
+            torch.save(model.state_dict(), os.path.join(args.save_path, "pytorch_model.bin"))
+            model.config.save_pretrained(args.save_path)
 
+    else:
+        print("Skipping model weight save (--no_save was set).")
     model.to(args.device)
 
     ppl_q = eval_utils.evaluate_perplexity(model, tokenizer, device=args.device)

@@ -19,4 +19,6 @@ def get_args():
     parser.add_argument("--save_path", type=str, default="./quantized_model", help="Path to save output")
     parser.add_argument("--mode", type=str, choices=["svd", "gptq", "baseline"], default="svd")
 
+    parser.add_argument("--no_save", action="store_true", help="If set, the model weights will NOT be saved. Only logs will be saved.")
+
     return parser.parse_args()
