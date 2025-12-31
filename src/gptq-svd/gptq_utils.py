@@ -62,28 +62,49 @@ def gptq_block_kernel(
         update_mask = offsets_cols > k
         w_data = tl.where(update_mask[None, :], w_data - delta, w_data)
 
+def next_power_of_2(x):
+    return 1 if x == 0 else 2 ** (x - 1).bit_length()
+
+
 def triton_process_block(w_block, R_block, quantizer):
-    out_features, block_size = w_block.shape
-    q_block = torch.empty_like(w_block)
-    e_block = torch.empty_like(w_block)
+    out_features, n_cols = w_block.shape
+    target_block_size = next_power_of_2(n_cols)
+    if target_block_size < 16: target_block_size = 16
+    pad_cols = target_block_size - n_cols
+    if pad_cols > 0:
+        w_input = torch.nn.functional.pad(w_block, (0, pad_cols), mode='constant', value=0.0)
+    else:
+        w_input = w_block
+    if pad_cols > 0:
+        R_input = torch.nn.functional.pad(R_block, (0, pad_cols, 0, pad_cols), mode='constant', value=1.0)
+    else:
+        R_input = R_block
+    q_output = torch.empty_like(w_input)
+    e_output = torch.empty_like(w_input)
     BLOCK_ROWS = 64
-    grid = lambda meta: (triton.cdiv(out_features, 64),)
+    grid = lambda meta: (triton.cdiv(out_features, BLOCK_ROWS),)
     gptq_block_kernel[grid](
-            w_block, q_block, e_block, R_block,
+            w_input, q_output, e_output, R_input,
             quantizer.scale.squeeze(),
             None,
-            w_block.stride(0), w_block.stride(1),
-            q_block.stride(0), q_block.stride(1),
-            e_block.stride(0), e_block.stride(1),
-            R_block.stride(0), R_block.stride(1),
+            w_input.stride(0), w_input.stride(1),
+            q_output.stride(0), q_output.stride(1),
+            e_output.stride(0), e_output.stride(1),
+            R_input.stride(0), R_input.stride(1),
             quantizer.scale.stride(0),
             out_features,
-            BLOCK_SIZE=block_size,
+            BLOCK_SIZE=target_block_size,
             BLOCK_ROWS=BLOCK_ROWS,
             MIN_VAL=quantizer.min_val,
             MAX_VAL=quantizer.max_val
             )
-    return q_block, e_block
+    if pad_cols > 0:
+        q_final = q_output[:, :n_cols]
+        e_final = e_output[:, :n_cols]
+    else:
+        q_final = q_output
+        e_final = e_output
+    return q_final, e_final
 
 
 class Quantizer:
