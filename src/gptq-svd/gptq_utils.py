@@ -320,6 +320,8 @@ def gptq_svd_qr_fwrd(
     device = weight_mat.device
     dtype = weight_mat.dtype
     input_sketch_64 = input_sketch.to(dtype=torch.float64)
+    del input_sketch
+    torch.cuda.empty_cache()
     _, S, Vh = torch.linalg.svd(input_sketch_64, full_matrices=False)
     keep_mask = S > threshold * S[0]
     # alternatively want to test S > threshold * S[0]
