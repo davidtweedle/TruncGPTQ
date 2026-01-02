@@ -106,7 +106,7 @@ def main():
     start_global = time.time()
 
     for i, layer in enumerate(layers):
-        print(f"Processing Layer {i}/{len(layers)}...")
+        print(f"Processing Layer {i + 1}/{len(layers)}...")
         layer_start_time = time.time()
         layer = layer.to(args.device)
 

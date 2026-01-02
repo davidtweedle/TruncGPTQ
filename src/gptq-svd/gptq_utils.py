@@ -326,6 +326,12 @@ def gptq_svd_qr_fwrd(
     ref_k = min(128, len(S))
     ref_val = torch.mean(S[:ref_k])
     keep_mask = S > threshold * ref_val
+    current_rank = int(keep_mask.sum().item())
+    hard_limit = int(0.75 * in_features)
+    if current_rank > hard_limit:
+        current_rank = hard_limit
+        keep_mask[hard_limit:] = False
+        print(f"   [INFO] Rank clamped to limit: {current_rank}/{in_features} (75.0%)")
     # alternatively want to test S > threshold * S[0]
     S = S[keep_mask]
     Vh = Vh[keep_mask, :]
