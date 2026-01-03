@@ -52,7 +52,7 @@ def main():
     input_ids_list = data_utils.get_loaders(args.dataset, tokenizer, args.n_samples, args.seq_len)
 
     inps, outs, layer_kwargs = model_utils.capture_initial_inputs(
-            model, input_ids_list, device="cpu"
+            model, input_ids_list, device=args.device
             )
     layers = model_utils.get_layers(model)
 
