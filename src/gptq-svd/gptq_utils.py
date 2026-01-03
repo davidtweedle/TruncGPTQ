@@ -14,7 +14,7 @@ from triton import language as tl
 import time
 
 jax.config.update("jax_enable_x64", True)
-jax.config.update("jax_use_magma", True)
+jax.config.update("jax_use_magma", 'on')
 
 try:
     print(f"[JAX Setup] Available devices: {jax.devices()}")
