@@ -11,6 +11,8 @@ import math
 import triton
 from triton import language as tl
 
+import time
+
 jax.config.update("jax_enable_x64", True)
 
 try:
@@ -355,21 +357,22 @@ def gptq_svd_qr_fwrd(
         print(f"   [INFO] Rank: {current_rank}/{in_features} ({current_rank/in_features:.1%})")
     H_sqrt = S.unsqueeze(1) * Vh
     if permute_order is None:
-        if H_sqrt.device.type != 'cuda':
-            H_sqrt = H_sqrt.to("cuda")
         H_sqrt_jax = from_dlpack(H_sqrt)
-        _, R_jax, perm_jax = jax.scipy.linalg.qr(H_sqrt_jax, pivoting=True, mode='economic')
+        torch.cuda.synchronize()
+        start_time = time.perf_counter()
+        _, _, perm_jax = jax.scipy.linalg.qr(H_sqrt_jax, pivoting=True, mode='economic')
         perm = torch.from_dlpack(perm_jax).long()
-        R = torch.from_dlpack(R_jax)
-        del H_sqrt_jax, perm_jax, R_jax, H_sqrt
+        perm_jax.block_until_ready()
+        del H_sqrt_jax, perm_jax, H_sqrt
     else:
         perm = permute_order
-        H_perm = H_sqrt[:, perm]
-        _, R = torch.linalg.qr(H_perm)
     S_inv = 1.0 / S
     H_sqrt_inv = S_inv.unsqueeze(1) * Vh
     H_sqrt_inv_perm = H_sqrt_inv[:, perm]
     _, R_prime = torch.linalg.qr(H_sqrt_inv_perm, mode='reduced')
+    torch.cuda.synchronize()
+    end_time = time.perf_counter()
+    print(f"QR time: {end_time - start_time:.4f}s")
     diag_sign = torch.sign(torch.diagonal(R_prime))
     R_prime = R_prime * diag_sign.unsqueeze(1)
     R = R_prime.to(dtype)
