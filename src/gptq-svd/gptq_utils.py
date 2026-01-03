@@ -357,23 +357,22 @@ def gptq_svd_qr_fwrd(
         print(f"   [INFO] Rank: {current_rank}/{in_features} ({current_rank/in_features:.1%})")
     H_sqrt = S.unsqueeze(1) * Vh
     if permute_order is None:
-        H_sqrt_float = H_sqrt.to(torch.float32)
+        H_sqrt_float = H_sqrt.to(torch.float32).contiguous()
         H_sqrt_jax = from_dlpack(H_sqrt_float)
         torch.cuda.synchronize()
         start_time = time.perf_counter()
         _, _, perm_jax = jax.scipy.linalg.qr(H_sqrt_jax, pivoting=True, mode='economic')
-        perm = torch.from_dlpack(perm_jax).long()
         perm_jax.block_until_ready()
+        perm = torch.from_dlpack(perm_jax).long()
         del H_sqrt_jax, perm_jax, H_sqrt, H_sqrt_float
+        torch.cuda.synchronize()
+        print(f"   [TIMING] QR/perm: {time.perf_counter() - start_time:.4f}s")
     else:
         perm = permute_order
     S_inv = 1.0 / S
     H_sqrt_inv = S_inv.unsqueeze(1) * Vh
     H_sqrt_inv_perm = H_sqrt_inv[:, perm]
     _, R_prime = torch.linalg.qr(H_sqrt_inv_perm, mode='reduced')
-    torch.cuda.synchronize()
-    end_time = time.perf_counter()
-    print(f"QR time: {end_time - start_time:.4f}s")
     diag_sign = torch.sign(torch.diagonal(R_prime))
     R_prime = R_prime * diag_sign.unsqueeze(1)
     R = R_prime.to(dtype)
