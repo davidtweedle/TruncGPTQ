@@ -362,7 +362,7 @@ def gptq_svd_qr_fwrd(
         torch.cuda.synchronize()
         start_time = time.perf_counter()
         _, _, perm_jax = jax.scipy.linalg.qr(H_sqrt_jax, pivoting=True, mode='economic')
-        perm_jax.block_until_ready()
+        perm_jax = perm_jax.block_until_ready()
         perm = torch.from_dlpack(perm_jax).long()
         del H_sqrt_jax, perm_jax, H_sqrt, H_sqrt_float
         torch.cuda.synchronize()
