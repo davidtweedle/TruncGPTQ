@@ -1,24 +1,102 @@
+"""
+General utilities
+-----------------
+Argument parsing and logging configuration.
+"""
+
 import argparse
+import logging
+import sys
+import os
+
+def setup_logging(save_path: str = None, log_level: str = "INFO"):
+    """
+    Configures the root logger to print to console and optionally to a file.
+    """
+    handlers = [logging.StreamHandler(sys.stdout)]
+
+    if save_path:
+        os.make_dirs(save_path, exist_ok=True)
+        log_file = os.path.join(save_path, "quantization.log")
+        handlers.append(logging.FileHandler(log_file))
+
+    logging.basicConfig(
+            level=getattr(logging, log_level.upper()),
+            format="[%(asctime)s] %(levelname)s: %(message)s",
+            datefmt="%H:%M:%S",
+            handlers=handlers
+            )
 
 
 def get_args():
-    parser = argparse.ArgumentParser(description="GPTQ-like Quantization")
+    parser = argparse.ArgumentParser(
+            description="GPTQ-SVD: Low-rank aware quantization for LLMs",
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter
+            )
 
-    parser.add_argument("--model_id", type=str, default="Qwen/Qwen2-1.5B", help="HuggingFace model identifier")
-    parser.add_argument("--device", type=str, default="cuda", help="Device to run on")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
-    parser.add_argument("--dataset", type=str, default="wikitext2", choices=["wikitext2", "c4"], help="Calibration dataset")
-    parser.add_argument("--n_samples", type=int, default=128, help="Number of calibration samples")
-    parser.add_argument("--seq_len", type=int, default=2048, help="Sequence length for calibration")
+    # --- Model Configuration ---
+    model_group = parser.add_argument_group("Model Configuration")
 
-    parser.add_argument("--w_bits", type=int, default=4, help="Target weight bits")
-    parser.add_argument("--sketch_ratio", type=float, default=1.0, help="Ratio of sketch size to input dimension (d = ratio * n)")
-    parser.add_argument("--k_iter", type=int, default=0, help="Power iterations for randomized SVD")
-    parser.add_argument("--eps", type=float, default=1e-2, help="Singular value truncation threshold")
-    parser.add_argument("--save_path", type=str, default="./quantized_model", help="Path to save output")
-    parser.add_argument("--mode", type=str, choices=["svd", "gptq", "baseline"], default="svd")
+    model_group.add_argument(
+            "--model_id", type=str, default="Qwen/Qwen3-8B",
+            help="HuggingFace model identifier or local path"
+            )
+    model_group.add_argument(
+            "--device", type=str, default="cuda",
+            help="Compute device (cuda/cpu)"
+            )
+    model_group.add_argument(
+            "--seed", type=int, default=42,
+            help="Random seed for reproducibility"
+            )
 
-    parser.add_argument("--no_save", action="store_true", help="If set, the model weights will NOT be saved. Only logs will be saved.")
+    # --- Data Configuration ---
+    data_group = parser.add_argument_group("Data Configuration")
 
-    return parser.parse_args()
+    data_group.add_argument(
+            "--dataset", type=str, default="wikitext2", choices=["wikitext2", "c4"],
+            help="Calibration dataset to use"
+            )
+    data_group.add_argument(
+            "--n_samples", type=int, default=128,
+            help="Number of calibration samples to capture"
+            )
+    data_group.add_argument(
+            "--seq_len", type=int, default=2048,
+            help="Sequence length for calibration"
+            )
+
+
+    # --- Quantization Configuration ---
+    quant_group = parser.add_argument_group("Quantization Parameters")
+    quant_group.add_argument(
+            "--w_bits", type=int, default=4, choices=[2, 3, 4, 8],
+            help="Target bit-width for quantized weights"
+            )
+    quant_group.add_argument(
+            "--eps", type=float, default=1e-2,
+            help="Energy preservation threshold"
+            )
+    quant_group.add_argument(
+            "--sketch_ratio", type=float, default=4.0,
+            help="Ratio of sketch size to input dimension (d = ratio * n)"
+            )
+    quant_group.add_argument(
+            "--mode", type=str, choices=["svd", "gptq", "baseline"], default="svd",
+            help="Quantization Strategy: 'svd' (Ours), 'gptq' (Reference), or 'baseline' (RTN)"
+            )
+
+    # --- Output Configuration ---
+    out_group = parser.add_argument_group("Output Configuration")
+    out_group.add_argument(
+            "--save_path", type=str, default="./output",
+            help="Directory to save quantized model and logs"
+            )
+    out_group.add_argument(
+            "--no_save", action="store_true",
+            help="If set, skips saving the final model weights"
+            )
+
+    args = parser.parse_args()
+    return args
