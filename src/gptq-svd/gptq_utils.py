@@ -77,7 +77,7 @@ class Quantizer:
     Simple pseudo quantizer.
     Calculates scales based on max of absolute values of weights.
     """
-    def __init__(self, per_channe: bool = True, w_bits: int = 4):
+    def __init__(self, per_channel: bool = True, w_bits: int = 4):
         self.per_channel = per_channel
         self.w_bits = w_bits
         self.scale = None
