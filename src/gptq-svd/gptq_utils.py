@@ -282,20 +282,19 @@ def gptq_svd_qr_fwrd(
 
     _, S, Vh = torch.linalg.svd(input_sketch_64, full_matrices=False)
 
-    ref_k = min(128, len(S))
-    ref_val = torch.mean(S[:ref_k])
+    ref_k = min(32, len(S))
+    ref_val = torch.mean(S[1:ref_k])
     keep_mask = S > threshold * ref_val
     current_rank = int(keep_mask.sum().item())
 
-    hard_limit = int(0.9 * in_features)
-    if current_rank > hard_limit:
-        current_rank = hard_limit
-        keep_mask[hard_limit:] = False
-        print(f"   [INFO] Rank clamped to limit: {current_rank}/{in_features} (90.0%)")
+#    hard_limit = int(0.9 * in_features)
+#    if current_rank > hard_limit:
+#        current_rank = hard_limit
+#        keep_mask[hard_limit:] = False
+#        print(f"   [INFO] Rank clamped to limit: {current_rank}/{in_features} (90.0%)")
     # alternatively want to test S > threshold * S[0]
     S = S[keep_mask]
     Vh = Vh[keep_mask, :]
-    current_rank = int(S.shape[0])
 
     if current_rank > 0.8 * in_features:
         print(f"   [INFO] High Rank: {current_rank}/{in_features} ({current_rank/in_features:.1%})")
