@@ -76,7 +76,7 @@ def get_args():
             )
     quant_group.add_argument(
             "--eps", type=float, default=1e-2,
-            help="Energy preservation threshold"
+            help="Threshold strength. For 'mean_trimmed', it is relative to the ref value. For 'energy', it is the allowed error variance."
             )
     quant_group.add_argument(
             "--sketch_ratio", type=float, default=4.0,
@@ -85,6 +85,10 @@ def get_args():
     quant_group.add_argument(
             "--mode", type=str, choices=["svd", "gptq", "baseline"], default="svd",
             help="Quantization Strategy: 'svd' (Ours), 'gptq' (Reference), or 'baseline' (RTN)"
+            )
+    quant_group.add_argument(
+            "--threshold_method", type=str, default="mean_trimmed", choices=["mean_trimmed", "energy"],
+            help="Strategy for rank selection. 'mean_trimmed' uses mean(S[1:32]). 'energy' preserves (1-eps) variance."
             )
 
     # --- Output Configuration ---
