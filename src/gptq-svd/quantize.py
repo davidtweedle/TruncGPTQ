@@ -193,7 +193,7 @@ def main():
             del inp_batch, batch_kwargs
         inps, outs = outs, inps
         cleanup()
-        logging.info(f"Layer {i} Done. Time: {time.time() - layer_start_time:.2f}s")
+        logging.info(f"Layer {i + 1} Done. Time: {time.time() - layer_start_time:.2f}s")
     del inps, outs, layer_inputs
     if 'layer_kwargs' in locals():
         del layer_kwargs
