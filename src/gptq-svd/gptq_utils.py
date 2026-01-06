@@ -401,6 +401,7 @@ def gptq_ref_fwrd(
         out_weight: torch.Tensor,
         quantizer: Quantizer,
         blocksize: int,
+        actorder: bool = False,
         ):
     """
     Standard GPTQ/Block LDLQ algorithm (for benchmarking).
@@ -420,18 +421,30 @@ def gptq_ref_fwrd(
         n_samples += chunk_samples
         del X
 
+    if actorder:
+        perm = torch.argsort(torch.diag(H), descending=True)
+        W = weight_mat[:, perm]
+        H = H[perm][:, perm]
+    else:
+        perm = torch.arange(n, device=device)
+        W = weight_mat.clone()
+
     # Damping and Cholesky
     percdamp = 0.01
     diag = H.diagonal()
     mean = torch.mean(diag)
     diag.add_(percdamp * mean)
 
-    H2 = torch.linalg.cholesky(H)
-    Hinv = torch.linalg.cholesky(torch.cholesky_inverse(H2), upper=True)
-    del H2
+    try:
+        H2 = torch.linalg.cholesky(H)
+        Hinv = torch.linalg.cholesky(torch.cholesky_inverse(H2), upper=True)
+        del H2
+    except RuntimeError:
+        print(f"[WARNING] Cholesky failed with damping.")
+        return
 
-    W = weight_mat.clone()
     quantizer.init_scale(W)
+    Q_final = torch.zeros_like(W)
     Losses = torch.zeros_like(W)
 
     # Standard loop
@@ -454,9 +467,13 @@ def gptq_ref_fwrd(
             W1[:, i:] -= err1.unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
             Err1[:, i] = err1
 
-        out_weight[:, i1:i2] = Q1
+        Q_final[:, i1:i2] = Q1
         Losses[:, i1:i2] = Losses1 / 2
-        W[:, i2:] -= Err1.matmul(Hinv[i1:i2, i2:])
+        if i2 < n:
+            W[:, i2:] -= Err1.matmul(Hinv[i1:i2, i2:])
+
+    inv_perm = torch.argsort(perm)
+    out_weight = Q_final[:, inv_perm]
 
     avg_loss = torch.sum(Losses).item() / n_samples
     print(f"Losses sum item: {torch.sum(Losses).item()}")
