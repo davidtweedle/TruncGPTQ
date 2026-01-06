@@ -17,8 +17,8 @@ BASE_SAVE_DIR = Path(f"experiments_ref_{TIMESTAMP}")
 
 # Define the two critical runs
 experiments = [
-    {"mode": "baseline", "name": "FP16_Baseline"},
-    {"mode": "gptq",     "name": "GPTQ_Reference_4bit"}
+    {"mode": "baseline", "name": "FP16_Baseline", "flags": ""},
+    {"mode": "gptq", "name": "GPTQ_Reference_4bit", "flags": "--actorder"}
 ]
 
 def run_command(cmd: str) -> str:
@@ -71,6 +71,7 @@ def main():
             f"--mode {params['mode']} "
             f"--save_path {save_path} "
             f"--device {DEVICE} "
+            f"{params['flags']} "
             f"--no_save "
         )
 
