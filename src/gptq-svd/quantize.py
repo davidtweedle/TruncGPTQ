@@ -52,7 +52,7 @@ def main():
             "metrics": {}
             }
 
-    model, tokenizer = model_utils.get_model(args.model_id, args.device)
+    model, tokenizer = model_utils.get_model(args.model_id, "cpu")
     model.config.use_cache = False
     if not hasattr(model, "seqlen"):
         model.seqlen = args.seq_len
@@ -165,7 +165,8 @@ def main():
                             weight_mat=W,
                             out_weight=out_weight,
                             quantizer=quantizer,
-                            blocksize=128
+                            blocksize=128,
+                            actorder=args.actorder
                             )
                     submodule.weight.copy_(out_weight)
                     del out_weight, X_list, layer_inputs[name]
@@ -192,6 +193,7 @@ def main():
             outs[j] = layer(inp_batch, **batch_kwargs)[0].squeeze(0).to("cpu")
             del inp_batch, batch_kwargs
         inps, outs = outs, inps
+        layer = layer.to("cpu")
         cleanup()
         logging.info(f"Layer {i + 1} Done. Time: {time.time() - layer_start_time:.2f}s")
     del inps, outs, layer_inputs
