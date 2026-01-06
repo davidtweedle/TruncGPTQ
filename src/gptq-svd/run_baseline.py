@@ -8,7 +8,7 @@ from pathlib import Path
 # --- Configuration ---
 PYTHON_INTERPRETER = "python"
 SCRIPT_PATH = "quantize.py"
-MODEL_ID = "Qwen/Qwen2.5-7B"  # Updated to the model we are using
+MODEL_ID = "Qwen/Qwen3-8B"  # Updated to the model we are using
 DATASET = "wikitext2"
 DEVICE = "cuda:0"
 
