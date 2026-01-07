@@ -120,11 +120,17 @@ def main():
             layer_ranks = []
             if args.mode == 'svd':
                 Y_sketch = accumulator.get_scaled_sketch()
+                del accumulator
+                logging.info(f"   Processing Sketch (Shape: {Y_sketch.shape})")
+                process_start = time.time()
                 R, perm = process_sketch(
                         sketch=Y_sketch,
                         threshold=args.eps,
                         threshold_method=args.threshold_method
                         )
+                logging.info(f"   Sketch processed in {time.time() - process_start}")
+                del Y_sketch
+                cleanup()
                 shared_stats = {"R": R, "perm": perm}
             elif args.mode == 'gptq':
                 H_matrix = accumulator.get_hessian()

@@ -128,7 +128,7 @@ class Sketcher:
         self.rank = rank
         self.device = device
         self.in_features = layer.in_features
-        self.Y = torch.zeros((rank, self.in_features), device=device, dtype=torch.float32)
+        self.Y = torch.zeros((rank, self.in_features), device=device, dtype=torch.float32).contiguous()
         self.n_samples = 0
 
     def hook_fn(self, module: nn.Module, input_args: Tuple[torch.Tensor], output: torch.Tensor):
@@ -146,7 +146,10 @@ class Sketcher:
         R_batch = torch.randn((self.rank, batch_count), device=self.device, dtype=torch.float32)
 
         # Accumulate sketch
-        self.Y += R_batch @ x_float
+        # self.Y += R_batch @ x_float
+        self.Y.addmm_(R_batch, x_float, beta=1.0, alpha=1.0)
+
+        del R_batch, x_float
 
     def get_scaled_sketch(self) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], int]:
         if self.n_samples == 0:
@@ -154,8 +157,8 @@ class Sketcher:
 
         # Normalize by sqrt(N * rank) to stabilize numerical scale
         scale_factor = 1.0 / math.sqrt(self.n_samples * self.rank)
-        Y_final = self.Y * scale_factor
-        return Y_final
+        self.Y.mul_(scale_factor)
+        return self.Y
 
 class HessianAccumulator:
     def __init__(self, in_features, device, dtype=torch.float64):
@@ -379,6 +382,8 @@ def gptq_svd_qr_fwrd(
     R = R.to(dtype)
 
     current_rank = R.shape[0]
+
+    logging.info(f"   Rank percent used: {float(current_rank) / R.shape[1]}")
 
     # Block wise quantization
     W = weight_mat[:, perm]
