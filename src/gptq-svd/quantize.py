@@ -11,7 +11,7 @@ from utils import get_args, setup_logging
 import data_utils
 import model_utils
 import eval_utils
-from gptq_utils import gptq_svd_qr_fwrd, Quantizer, gptq_ref_fwrd, Sketcher
+from gptq_utils import gptq_svd_qr_fwrd, Quantizer, gptq_ref_fwrd, Sketcher, process_sketch, process_hessian
 
 
 def cleanup():
@@ -70,9 +70,6 @@ def main():
             )
     layers = model_utils.get_layers(model)
 
-    layer_inputs = {}
-    sketch_cache = {}
-
     logging.info(f"\n--- Starting {args.mode.upper()} Pipeline ---")
     start_global = time.time()
 
@@ -84,27 +81,22 @@ def main():
         groups = model_utils.get_sequenced_groups(layer)
 
         for group_idx, group_names in enumerate(groups):
-            logging.info(f"  -> Group {group_idx+1}: {group_names}")
+            logging.info(f"  -> Group {group_idx+1}: {group_names} Inputs")
 
             handles = []
-            for name in group_names:
-                submodule = get_submodule(layer, name)
-                if args.mode == "svd":
-                    out_features, in_features = submodule.weight.shape
-                    rank = int(in_features * args.sketch_ratio)
-                    sketch_cache[name] = Sketcher(submodule, rank, device=args.device)
-                    handles.append(submodule.register_forward_hook(sketch_cache[name].hook_fn))
-                elif args.mode == "gptq":
-                    def get_hook(n):
-                        def hook(module, inp, output):
-                            x = inp[0].detach()
-                            if x.dim() == 3:
-                                x = x.reshape(-1, x.shape[-1])
-                            if n not in layer_inputs:
-                                layer_inputs[n] = []
-                            layer_inputs[n].append(x.cpu())
-                        return hook
-                    handles.append(submodule.register_forward_hook(get_hook(name)))
+            name = group_names[0]
+            submodule = get_submodule(layer, name)
+            out_features, in_features = submodule.weight.shape
+            capture_start = time.time()
+            if args.mode == "svd":
+                rank = int(in_features * args.sketch_ratio)
+                accumulator = Sketcher(submodule, rank, device=args.device)
+                handles.append(submodule.register_forward_hook(accumulator.hook_fn))
+            elif args.mode == "gptq":
+                accumulator = HessianAccumulator(in_features, device=args.device)
+                def h_hook(module, inp, out):
+                    accumulator.add_batch(inp[0].detach())
+                handles.append(submodule.register_forward_hook(h_hook))
             for j in range(args.n_samples):
                 inp_batch = inps[j].unsqueeze(0).to(args.device)
                 batch_kwargs = {}
@@ -125,7 +117,23 @@ def main():
             for h in handles:
                 h.remove()
             cleanup()
+            logging.info(f"Time for capturing inputs of {name}: {time.time() - capture_start}s")
             layer_ranks = []
+            if args.mode == 'svd':
+                Y_sketch = accumulator.get_scaled_sketch()
+                R, perm = process_sketch(
+                        sketch=Y_sketch,
+                        threshold=args.eps,
+                        threshold_method=args.threshold_method
+                        )
+                shared_stats = {"R": R, "perm": perm}
+            elif args.mode == 'gptq':
+                H_matrix = accumulator.get_hessian()
+                R, perm = process_hessian(
+                        H=H_matrix,
+                        actorder=args.actorder
+                        )
+                shared_stats = {"R": R, "perm": perm}
             for name in group_names:
                 submodule = get_submodule(layer, name)
                 W = submodule.weight.data.float()
@@ -133,48 +141,33 @@ def main():
 
                 quantizer = Quantizer(per_channel=True, w_bits=args.w_bits)
                 module_stat = {"name": f"layer_{i}.{name}", "n_cols": n}
+                solve_start = time.time()
                 if args.mode == "svd":
                     logging.info(f"Quantizing {name} (SVD)")
-                    solve_start = time.time()
-                    Y_sketch = sketch_cache[name].get_scaled_sketch()
                     final_W, used_rank = gptq_svd_qr_fwrd(
                             weight_mat=W,
-                            input_sketch=Y_sketch,
+                            R=shared_stats["R"],
                             quantizer=quantizer,
-                            threshold=args.eps,
-                            threshold_method=args.threshold_method,
-                            permute_order=None,
+                            perm=shared_stats["perm"],
                             block_size=256
                             )
-                    submodule.weight.copy_(final_W)
-                    module_stat["solve_time"] = time.time() - solve_start
                     module_stat["rank_kept"] = used_rank
-                    module_stat["rank_fraction"] = float(used_rank) / n
-                    del Y_sketch, final_W, sketch_cache[name]
                 elif args.mode == "gptq":
                     logging.info(f"Quantizing {name} (Ref-GPTQ)...")
-                    if name not in layer_inputs:
-                        continue
-                    X_list = layer_inputs[name]
-                    out_weight = torch.zeros_like(W)
-                    def make_stream_adapter():
-                        for x_chunk in X_list:
-                            yield x_chunk.to(args.device, torch.float32)
+                    final_W = torch.zeros_like(W)
                     gptq_ref_fwrd(
-                            make_stream=make_stream_adapter,
+                            H_inv_chol=shared_stats["R"],
                             weight_mat=W,
-                            out_weight=out_weight,
+                            out_weight=final_W,
                             quantizer=quantizer,
                             blocksize=128,
-                            actorder=args.actorder
+                            perm=shared_stats["perm"]
                             )
-                    submodule.weight.copy_(out_weight)
-                    del out_weight, X_list, layer_inputs[name]
-                del W, quantizer
+                submodule.weight.copy_(final_W)
+                module_stat["solve_time"] = time.time() - solve_start
                 experiment_log["layer_stats"].append(module_stat)
                 cleanup()
-            layer_inputs.clear()
-            sketch_cache.clear()
+            del accumulator, shared_stats
             cleanup()
         for j in range(args.n_samples):
             inp_batch = inps[j].unsqueeze(0).to(args.device)
@@ -196,7 +189,7 @@ def main():
         layer = layer.to("cpu")
         cleanup()
         logging.info(f"Layer {i + 1} Done. Time: {time.time() - layer_start_time:.2f}s")
-    del inps, outs, layer_inputs
+    del inps, outs
     if 'layer_kwargs' in locals():
         del layer_kwargs
     cleanup()

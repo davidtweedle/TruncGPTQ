@@ -9,6 +9,7 @@ import os
 import math
 import gc
 from typing import Tuple, Optional, Generator, Union
+import logging
 
 # Environment configuration (Must be before JAX import)
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -28,6 +29,90 @@ jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_use_magma", 'on')
 jax.config.update("jax_platforms", "cuda,cpu")
 
+
+
+def process_sketch(
+        sketch: torch.Tensor,
+        threshold: float = 1e-2,
+        threshold_method: str = "mean_trimmed"
+        ) -> Tuple[torch.Tensor, torch.Tensor]:
+    sketch_double = sketch.to(dtype=torch.float64)
+    factor, _ = torch.geqrf(sketch_double)
+    n_features = sketch.shape[1]
+    R_reduced = torch.triu(factor[:n_features, :])
+    del factor, sketch_double
+
+    _, S, Vh = torch.linalg.svd(R_reduced, full_matrices=False)
+
+    if threshold_method == "energy":
+        energy = S ** 2
+        target = (1.0 - threshold) * torch.sum(energy)
+        current_rank = int((torch.cumsum(energy, dim=0) <= target).sum().item())
+        if current_rank < len(S):
+            current_rank += 1
+    elif threshold_method == "mean_trimmed":
+        ref_k = min(33, len(S))
+        ref_val = torch.mean(S[1:ref_k]) if len(S) > 1 else S[0]
+        current_rank = int((S > threshold * ref_val).sum().item())
+
+    current_rank = max(1, min(current_rank, len(S)))
+    S = S[:current_rank]
+    Vh = Vh[:current_rank, :]
+
+    H_sqrt = S.unsqueeze(1) * Vh
+
+    H_sqrt_jax = from_dlpack(H_sqrt)
+    _, _, perm_jax = jax.scipy.linalg.qr(H_sqrt_jax, pivoting=True, mode='economic')
+    perm = torch.from_dlpack(perm_jax).long()
+
+    S_inv = 1.0 / S
+    H_inv_partial = S_inv.unsqueeze(1) * Vh
+
+    H_inv_permuted = H_inv_partial[:, perm]
+
+    _, R_prime = torch.linalg.qr(H_inv_perm, mode='reduced')
+    diag_sign = torch.sign(torch.diagonal(R_prime))
+    R = R_prime * diag_sign.unsqueeze(1)
+
+    return R, perm
+
+
+def process_hessian(
+        H: torch.Tensor,
+        actorder: bool = False,
+        damp_percent: float = 0.01
+        ) -> Tuple[torch.Tensor, torch.Tensor]:
+    H_double = H.to(dtype=torch.float64)
+    n_features = H.shape[0]
+    device = H.device
+    if actorder:
+        perm = torch.argsort(torch.diag(H_double), descending=True)
+        H_double = H_double[perm][:, perm]
+    else:
+        perm = torch.arange(n_features, device=device)
+    diag = torch.diagonal(H_double)
+    mean_diag = torch.mean(diag)
+    if mean_diag == 0:
+        mean_diag = 1.0
+
+    H_inv_factor = None
+    for damp in [damp_percent, 0.1, 1.0, 10.0]:
+        try:
+            H_damped = H_double.clone()
+            H_damped.diagonal().add_(damp * mean_diag)
+            L = torch.linalg.cholesky(H_damped)
+            H_inv = torch.cholesky_inverse(L)
+            H_inv_chol = torch.linalg.cholesky(H_inv, upper=True)
+            if damp > damp_percent:
+                logging.info(f"  Ref-GPTQ required high damping: {damp}")
+            break
+        except RuntimeError:
+            continue
+
+    if H_inv_chol is None:
+        logging.warning(" Hessian is singular. Using Identity fallback.")
+        H_inv_chol = torch.eye(n_features, device=device, dtype=torch.float64)
+    return H_inv_chol, perm
 
 # ==============================================================================
 # CLASSES
@@ -72,6 +157,22 @@ class Sketcher:
         Y_final = self.Y * scale_factor
         return Y_final
 
+class HessianAccumulator:
+    def __init__(self, in_features, device, dtype=torch.float64):
+        self.H = torch.zeros((in_features, in_features), device=device, dtype=dtype)
+        self.n_samples = 0
+
+    def add_batch(self, x):
+        if x.dim() == 3:
+            x = x.reshape(-1, x.shape[-1])
+        x = x.to(self.H.dtype)
+        self.H += x.T @ x
+        self.n_samples += x.shape[0]
+
+    def get_hessian(self):
+        if self.n_samples == 0:
+            return self.H
+        return self.H / self.n_samples
 
 class Quantizer:
     """
@@ -256,11 +357,9 @@ def triton_process_block(
 
 def gptq_svd_qr_fwrd(
         weight_mat: torch.Tensor,
-        input_sketch: torch.Tensor,
+        R: torch.Tensor,
         quantizer: Quantizer,
-        threshold: float = 1e-2,
-        threshold_method: str = "mean_trimmed",
-        permute_order: Optional[torch.Tensor] = None,
+        perm: torch.Tensor,
         block_size: int = 256
         ) -> Tuple[torch.Tensor, int]:
     """
@@ -277,81 +376,7 @@ def gptq_svd_qr_fwrd(
     device = weight_mat.device
     dtype = weight_mat.dtype
 
-    # SVD on sketch
-    input_sketch_64 = input_sketch.to(dtype=torch.float64)
-    del input_sketch
-    torch.cuda.empty_cache()
-
-    _, S, Vh = torch.linalg.svd(input_sketch_64, full_matrices=False)
-
-    if threshold_method == "energy":
-        energy = S ** 2
-        total_energy = torch.sum(energy)
-        target_energy = (1.0 - threshold) * total_energy
-        cumulative_energy = torch.cumsum(energy, dim=0)
-        keep_mask = cumulative_energy <= target_energy
-        current_rank = int(keep_mask.sum().item())
-        if current_rank < len(S):
-            current_rank += 1
-        keep_mask = torch.zeros_like(S, dtype=torch.bool)
-        keep_mask[:current_rank] = True
-    elif threshold_method == "mean_trimmed":
-        ref_k_start = 1
-        ref_k_end = 33
-        if len(S) < ref_k_end:
-            ref_val = torch.mean(S[1:]) if len(S) > 1 else S[0]
-        else:
-            ref_val = torch.mean(S[ref_k_start : ref_k_end])
-        abs_threshold = threshold * ref_val
-        keep_mask = S > abs_threshold
-        current_rank = int(keep_mask.sum().item())
-    else:
-        raise ValueError(f"Unknown threshold method: {threshold_method}")
-
-
-    ref_k = min(32, len(S))
-    ref_val = torch.mean(S[1:ref_k])
-    keep_mask = S > threshold * ref_val
-    current_rank = int(keep_mask.sum().item())
-
-#    hard_limit = int(0.9 * in_features)
-#    if current_rank > hard_limit:
-#        current_rank = hard_limit
-#        keep_mask[hard_limit:] = False
-#        print(f"   [INFO] Rank clamped to limit: {current_rank}/{in_features} (90.0%)")
-    # alternatively want to test S > threshold * S[0]
-    S = S[keep_mask]
-    Vh = Vh[keep_mask, :]
-
-    if current_rank > 0.8 * in_features:
-        print(f"   [INFO] High Rank: {current_rank}/{in_features} ({current_rank/in_features:.1%})")
-    else:
-        print(f"   [INFO] Rank: {current_rank}/{in_features} ({current_rank/in_features:.1%})")
-
-    # Construct H_sqrt = S*Vh so that H_sqrt^T H_sqrt ~ H
-    H_sqrt = S.unsqueeze(1) * Vh
-
-    if permute_order is None:
-        H_sqrt_jax = from_dlpack(H_sqrt)
-        # Pivoted QR finds columns with largest norm
-        _, _, perm_jax = jax.scipy.linalg.qr(H_sqrt_jax, pivoting=True, mode='economic')
-        perm = torch.from_dlpack(perm_jax).long()
-        del H_sqrt_jax, perm_jax, H_sqrt
-    else:
-        perm = permute_order
-
-    # Compute factor of inverse Hessian
-    S_inv = 1.0 / S
-    H_sqrt_inv = S_inv.unsqueeze(1) * Vh
-    H_sqrt_inv_perm = H_sqrt_inv[:, perm]
-
-    #  QR of H_sqrt_inv_perm gives upper triangular factor of H^{-1}
-    _, R_prime = torch.linalg.qr(H_sqrt_inv_perm, mode='reduced')
-
-    # make diagonals positive
-    diag_sign = torch.sign(torch.diagonal(R_prime))
-    R_prime = R_prime * diag_sign.unsqueeze(1)
-    R = R_prime.to(dtype)
+    current_rank = R.shape[0]
 
     # Block wise quantization
     W = weight_mat[:, perm]
@@ -396,12 +421,12 @@ def gptq_svd_qr_fwrd(
 # ==============================================================================
 
 def gptq_ref_fwrd(
-        make_stream: Generator,
+        H_inv_chol: torch.Tensor,
         weight_mat: torch.Tensor,
         out_weight: torch.Tensor,
         quantizer: Quantizer,
         blocksize: int,
-        actorder: bool = False,
+        perm: torch.Tensor,
         ):
     """
     Standard GPTQ/Block LDLQ algorithm (for benchmarking).
@@ -412,46 +437,7 @@ def gptq_ref_fwrd(
     dtype = weight_mat.dtype
 
     # Accumulate Hessian
-    H = torch.zeros(n, n, dtype=dtype, device=device)
-    n_samples = 0
-    for X in make_stream():
-        chunk_samples = X.shape[0]
-        X = X.to(device, dtype)
-        H = H * (n_samples) / (n_samples + chunk_samples) + (1 / (n_samples + chunk_samples)) * X.T @ X
-        n_samples += chunk_samples
-        del X
-
-    if actorder:
-        perm = torch.argsort(torch.diag(H), descending=True)
-        W = weight_mat[:, perm]
-        H = H[perm][:, perm]
-    else:
-        perm = torch.arange(n, device=device)
-        W = weight_mat.clone()
-
-    # Damping and Cholesky
-    percdamp = 0.01
-    diag = H.diagonal()
-    mean = torch.mean(diag)
-    if mean == 0:
-        mean = 1.0
-
-    Hinv = None
-
-    for damping_factor in [percdamp, 0.1, 1.0]:
-        try:
-            H_damped = H.clone()
-            H_damped.diagonal().add_(damping_factor * mean)
-            H2 = torch.linalg.cholesky(H_damped)
-            Hinv = torch.linalg.cholesky(torch.cholesky_inverse(H2), upper=True)
-            if damping_factor > percdamp:
-                print(f"  [INFO] Cholesky succeeded with high damping: {damping_factor:.2f}")
-            break
-        except RuntimeError:
-            continue
-    if Hinv is None:
-        print(f"  [WARNING] Hessian is singular. Falling back to RTN")
-        Hinv = torch.eye(n, device=device, dtype=dtype)
+    W = weight_mat[:, perm]
 
     quantizer.init_scale(W)
     Q_final = torch.zeros_like(W)
@@ -465,7 +451,7 @@ def gptq_ref_fwrd(
         Q1 = torch.zeros_like(W1)
         Err1 = torch.zeros_like(W1)
         Losses1 = torch.zeros_like(W1)
-        Hinv1 = Hinv[i1:i2, i1:i2]
+        Hinv1 = H_inv_chol[i1:i2, i1:i2]
 
         for i in range(count):
             w = W1[:, i]
@@ -480,10 +466,10 @@ def gptq_ref_fwrd(
         Q_final[:, i1:i2] = Q1
         Losses[:, i1:i2] = Losses1 / 2
         if i2 < n:
-            W[:, i2:] -= Err1.matmul(Hinv[i1:i2, i2:])
+            W[:, i2:] -= Err1.matmul(H_inv_chol[i1:i2, i2:])
 
     inv_perm = torch.argsort(perm)
     out_weight[:] = Q_final[:, inv_perm]
 
-    del H, W, Q_final, Losses
+    del W, Q_final, Losses
     torch.cuda.empty_cache()
