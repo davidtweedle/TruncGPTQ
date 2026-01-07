@@ -360,7 +360,7 @@ def gptq_svd_qr_fwrd(
         R: torch.Tensor,
         quantizer: Quantizer,
         perm: torch.Tensor,
-        block_size: int = 256
+        block_size: int = 1024
         ) -> Tuple[torch.Tensor, int]:
     """
     SVD/QR with pivoting based GPTQ using pre-computed sketch

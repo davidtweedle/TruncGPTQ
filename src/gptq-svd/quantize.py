@@ -149,7 +149,7 @@ def main():
                             R=shared_stats["R"],
                             quantizer=quantizer,
                             perm=shared_stats["perm"],
-                            block_size=256
+                            block_size=1024
                             )
                     module_stat["rank_kept"] = used_rank
                 elif args.mode == "gptq":
