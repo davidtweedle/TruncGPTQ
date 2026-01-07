@@ -70,7 +70,7 @@ def process_sketch(
 
     H_inv_permuted = H_inv_partial[:, perm]
 
-    _, R_prime = torch.linalg.qr(H_inv_perm, mode='reduced')
+    _, R_prime = torch.linalg.qr(H_inv_permuted, mode='reduced')
     diag_sign = torch.sign(torch.diagonal(R_prime))
     R = R_prime * diag_sign.unsqueeze(1)
 
