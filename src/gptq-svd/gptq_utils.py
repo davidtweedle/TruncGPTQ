@@ -36,11 +36,20 @@ def process_sketch(
         threshold: float = 1e-2,
         threshold_method: str = "mean_trimmed"
         ) -> Tuple[torch.Tensor, torch.Tensor]:
-    sketch_double = sketch.to(dtype=torch.float64)
+    device = sketch.device
+    n_features = sketch.shape[1]
+    logging.info(f"   [Memory defrag] Moving sketch {sketch.shape} to CPU"})
+    sketch_cpu = sketch.cpu()
+    del sketch
+    torch.cuda.empty_cache()
+    logging.info(f"   [Memory alloc] Allocating Float64 buffer on gpu")
+    sketch_double = sketch_cpu.to(device=device, dtype=torch.float64)
+    del sketch_cpu
     factor, _ = torch.geqrf(sketch_double)
     n_features = sketch.shape[1]
     R_reduced = torch.triu(factor[:n_features, :])
     del factor, sketch_double
+    torch.cuda.empty_cache()
 
     _, S, Vh = torch.linalg.svd(R_reduced, full_matrices=False)
 
