@@ -38,7 +38,7 @@ def process_sketch(
         ) -> Tuple[torch.Tensor, torch.Tensor]:
     device = sketch.device
     n_features = sketch.shape[1]
-    logging.info(f"   [Memory defrag] Moving sketch {sketch.shape} to CPU"})
+    logging.info(f"   [Memory defrag] Moving sketch {sketch.shape} to CPU")
     sketch_cpu = sketch.cpu()
     del sketch
     torch.cuda.empty_cache()
