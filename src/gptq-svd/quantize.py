@@ -97,6 +97,14 @@ def main():
                 def h_hook(module, inp, out):
                     accumulator.add_batch(inp[0].detach())
                 handles.append(submodule.register_forward_hook(h_hook))
+            elif args.mode == "test":
+                accumulator_hessian = HessianAccumulator(in_features, device=args.device)
+                rank = int(in_features * args.sketch_ratio)
+                accumulator_sketch = Sketcher(submodule, rank, device=args.device)
+                def h_hook(module, inp, out):
+                    accumulator_hessian.add_batch(inp[0].detach())
+                handles.append(submodule.register_forward_hook(accumulator_sketch.hook_fn))
+                handles.append(submodule.register_forward_hook(h_hook))
             for j in range(args.n_samples):
                 inp_batch = inps[j].unsqueeze(0).to(args.device)
                 batch_kwargs = {}
@@ -149,6 +157,21 @@ def main():
                         threshold_method=args.threshold_method
                         )
                 shared_stats = {"R": R, "perm": perm}
+            elif args.mode == 'test':
+                H_matrix = accumulator_hessian.get_hessian()
+                Y_sketch = accumulator_sketch.get_scaled_sketch()
+                H_eigvals = torch.linalg.eigvalsh(H_matrix)
+                H_max_val = H_eigvals[-1]
+                del H_eigvals, H_matrix, accumulator_hessian
+                Y_max_sv = torch.linalg.svdvals(Y_sketch)[0]
+                H_max_sqrt = torch.sqrt(H_max_val)
+                ratio = H_max_sqrt / Y_max_sv
+                logging.info(f"Spectral check for {name}:")
+                logging.info(f"   sqrt(max_eig(H)): {H_max_sqrt.item():.4f}")
+                logging.info(f"   max_sv(Y):        {Y_max_sv.item():.4f}")
+                logging.info(f"   ratio:            {ratio.item():.4f")
+                # get eigs and singular values of H and Y
+
             logging.info(f"Time for processing inputs of {name}: {time.time() - capture_start}s")
             for name in group_names:
                 submodule = get_submodule(layer, name)
@@ -179,6 +202,9 @@ def main():
                             blocksize=128,
                             perm=shared_stats["perm"]
                             )
+                elif args.mode == "test":
+                    final_W = W
+                    logging.info(f"Test mode - skipping quantization.")
                 submodule.weight.copy_(final_W)
                 module_stat["solve_time"] = time.time() - solve_start
                 experiment_log["layer_stats"].append(module_stat)
