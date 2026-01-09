@@ -11,7 +11,7 @@ from utils import get_args, setup_logging
 import data_utils
 import model_utils
 import eval_utils
-from gptq_utils import gptq_svd_qr_fwrd, Quantizer, gptq_ref_fwrd, Sketcher, process_sketch, process_hessian, process_hessian_alt
+from gptq_utils import gptq_svd_qr_fwrd, Quantizer, gptq_ref_fwrd, Sketcher, process_sketch, process_hessian, process_hessian_alt, HessianAccumulator
 
 
 def cleanup():
