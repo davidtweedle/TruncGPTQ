@@ -169,8 +169,7 @@ def main():
                 logging.info(f"Spectral check for {name}:")
                 logging.info(f"   sqrt(max_eig(H)): {H_max_sqrt.item():.4f}")
                 logging.info(f"   max_sv(Y):        {Y_max_sv.item():.4f}")
-                logging.info(f"   ratio:            {ratio.item():.4f")
-                # get eigs and singular values of H and Y
+                logging.info(f"   ratio:            {ratio.item():.4f}")
 
             logging.info(f"Time for processing inputs of {name}: {time.time() - capture_start}s")
             for name in group_names:
