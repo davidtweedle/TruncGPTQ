@@ -202,8 +202,8 @@ class Sketcher:
         if self.n_samples == 0:
             return None, None, 0
 
-        # Normalize by sqrt(N * rank) to stabilize numerical scale
-        scale_factor = 1.0 / math.sqrt(self.n_samples * self.rank)
+        # Normalize by sqrt(N * rank / 2) to stabilize numerical scale
+        scale_factor = math.sqrt(2.0) / math.sqrt(self.n_samples * self.rank)
         self.Y.mul_(scale_factor)
         return self.Y
 
