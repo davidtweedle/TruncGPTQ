@@ -92,7 +92,7 @@ def main():
                 rank = int(in_features * args.sketch_ratio)
                 accumulator = Sketcher(submodule, rank, device=args.device)
                 handles.append(submodule.register_forward_hook(accumulator.hook_fn))
-            elif args.mode == "gptq" or "eigh":
+            elif args.mode == "gptq" or args.mode == "eigh":
                 accumulator = HessianAccumulator(in_features, device=args.device)
                 def h_hook(module, inp, out):
                     accumulator.add_batch(inp[0].detach())
