@@ -34,6 +34,7 @@ def get_submodule(root, name):
         curr = getattr(curr, p)
     return curr
 
+
 def prepare_batch_kwargs(v, j, curr_batch_size, n_samples, device):
     if isinstance(v, torch.Tensor):
         if v.shape[0] == 1:
@@ -246,6 +247,9 @@ def main():
             del inp_batch, batch_kwargs, out_batch
             cleanup()
         inps, outs = outs, inps
+        print(f" [DEBUGGING] {type(inps)}")
+        for inp in inps:
+            print(f" [DEBUGGING] {inp.shape}")
         layer = layer.to("cpu")
         cleanup()
         logging.info(f"Layer {i + 1} Done. Time: {time.time() - layer_start_time:.2f}s")
