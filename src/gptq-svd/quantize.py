@@ -118,7 +118,11 @@ def main():
                 handles.append(submodule.register_forward_hook(accumulator_sketch.hook_fn))
                 handles.append(submodule.register_forward_hook(h_hook))
             for j in range(0, args.n_samples, args.batch_size):
-                inp_batch = inps[j: j + args.batch_size].to(args.device)
+                batch_slice = inps[j: j + args.batch_size]
+                if isinstance(batch_slice, list):
+                    inp_batch = torch.cat(batch_slice, dim=0).to(args.device)
+                else:
+                    inp_batch = batch_slice.to(args.device)
                 curr_batch_size = inp_batch.shape[0]
                 batch_kwargs = {
                         k: prepare_batch_kwargs(v, j, curr_batch_size, args.n_samples, args.device)
@@ -220,6 +224,11 @@ def main():
             del shared_stats
             cleanup()
         for j in range(0, args.n_samples, args.batch_size):
+            batch_slice = inps[j: j + args.batch_size]
+            if isinstance(batch_slice, list):
+                inp_batch = torch.cat(batch_slice, dim=0).to(args.device)
+            else:
+                inp_batch = batch_slice.to(args.device)
             inp_batch = inps[j: j + args.batch_size].to(args.device)
             curr_batch_size = inp_batch.shape[0]
             batch_kwargs = {
