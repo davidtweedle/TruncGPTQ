@@ -130,6 +130,10 @@ def main():
                 position_embeddings = get_rope_embeddings(layer, batch_inp, position_ids)
                 if position_embeddings is not None:
                     batch_kwargs["position_embeddings"] = position_embeddings
+                keys_to_delete = ["cache_position", "past_key_values"]
+                for k in keys_to_delete:
+                    if k in batch_kwargs:
+                        del batch_kwargs[k]
                 out = layer(batch_inp, **batch_kwargs)[0]
                 del batch_inp, batch_kwargs, out
                 cleanup()
@@ -238,6 +242,9 @@ def main():
             position_embeddings = get_rope_embeddings(layer, inp_batch, position_ids)
             if position_embeddings is not None:
                 batch_kwargs["position_embeddings"] = position_embeddings
+            for k in keys_to_delete:
+                if k in batch_kwargs:
+                    del batch_kwargs[k]
 
             out_batch = layer(inp_batch, **batch_kwargs)[0]
             for sub_idx in range(curr_batch_size):
