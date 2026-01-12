@@ -151,7 +151,7 @@ def capture_initial_inputs(
 
         def forward(self, inp, **kwargs):
             bsz = inp.shape[0]
-            inps[cache['i'] : cache['i' + bsz] = inp
+            inps[cache['i']: cache['i'] + bsz] = inp
             cache['i'] += bsz
 
             if cache['layer_kwargs'] is None:
