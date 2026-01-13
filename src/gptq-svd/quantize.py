@@ -110,7 +110,7 @@ def main():
                 handles.append(submodule.register_forward_hook(h_hook))
             for j in range(0, args.n_samples, args.batch_size):
                 batch_inp = inps[j: j + args.batch_size]
-                batch_kwargs = {k: v for k, v in layer_kwargs.items()}
+                batch_kwargs = {k: prepare_batch_kwargs(v) for k, v in layer_kwargs.items()}
                 batch_kwargs["use_cache"] = False
                 batch_kwargs["past_key_values"] = None
 
@@ -209,7 +209,7 @@ def main():
             cleanup()
         for j in range(0, args.n_samples, args.batch_size):
             inp_batch = inps[j: j + args.batch_size]
-            batch_kwargs = {k: v for k, v in layer_kwargs.items()}
+            batch_kwargs = {k: prepare_batch_kwargs(v) for k, v in layer_kwargs.items()}
             batch_kwargs["use_cache"] = False
             batch_kwargs["past_key_values"] = None
             out_batch = layer(inp_batch, **batch_kwargs)[0]
