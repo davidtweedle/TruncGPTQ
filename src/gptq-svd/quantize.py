@@ -115,7 +115,7 @@ def main():
                 batch_kwargs = {k: prepare_batch_kwargs(v, args.device) for k, v in layer_kwargs.items()}
                 batch_kwargs["use_cache"] = False
                 batch_kwargs["attention_mask"] = None
-                position_ids = torch.arange(seq_len, dtype=torch.long, device=args.device)
+                position_ids = torch.arange(seq_len, dtype=torch.long, device=args.device).unsqueeze(0)
                 batch_kwargs["position_ids"] = position_ids
                 cos, sin = rotary_emb(batch_inp, position_ids)
                 batch_kwargs["position_embeddings"] = (cos.to(args.device), sin.to(args.device))
@@ -224,7 +224,7 @@ def main():
             batch_kwargs["attention_mask"] = None
             position_ids = torch.arange(seq_len, dtype=torch.long, device=args.device).unsqueeze(0)
             batch_kwargs["position_ids"] = position_ids
-            cos, sin = rotary_emb(batch_inp, position_ids)
+            cos, sin = rotary_emb(inp_batch, position_ids)
             batch_kwargs["position_embeddings"] = (cos.to(args.device), sin.to(args.device))
             for k in ["cache_position", "past_key_values"]:
                 if k in batch_kwargs:
