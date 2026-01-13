@@ -67,10 +67,11 @@ def main():
     input_ids_list = data_utils.get_loaders(args.dataset, tokenizer, args.n_samples, args.seq_len)
 
     inps, layer_kwargs = model_utils.capture_initial_inputs(
-            model, input_ids_list, device=args.device
+            model, input_ids_list, device=args.device, batch_size=args.batch_size
             )
     outs = torch.zeros_like(inps)
     layers = model_utils.get_layers(model)
+    rotary_emb = model.model.rotary_emb
 
     logging.info(f"\n--- Starting {args.mode.upper()} Pipeline ---")
     start_global = time.time()
@@ -107,14 +108,20 @@ def main():
                     accumulator_hessian.add_batch(inp[0].detach())
                 handles.append(submodule.register_forward_hook(accumulator_sketch.hook_fn))
                 handles.append(submodule.register_forward_hook(h_hook))
-            for j in range(args.n_samples):
-                batch_inp = inps[j].unsqueeze(0).to(args.device)
+            for j in range(0, args.n_samples, args.batch_size):
+                batch_inp = inps[j: j + args.batch_size]
+                curr_batch_size = batch_inp.shape[0]
+                seq_len = batch_inp.shape[1]
+
+                position_ids = torch.arange(seq_len, dtype=torch.long, device=args.device).unsqueeze(0)
+                cos, sin = rotary_emb(batch_inp, position_ids)
                 batch_kwargs = {
-                        k: prepare_batch_kwargs(v, args.device)
-                        for k, v in layer_kwargs.items()
+                        "use_cache": False,
+                        "past_key_values": None,
+                        "attention_mask": None,
+                        "position_ids": position_ids,
+                        "position_embeddings": (cos, sin)
                         }
-                batch_kwargs["use_cache"] = False
-                batch_kwargs["attention_mask"] = None
                 out = layer(batch_inp, **batch_kwargs)[0]
                 del batch_inp, batch_kwargs, out
                 cleanup()
@@ -208,16 +215,22 @@ def main():
                 cleanup()
             del shared_stats
             cleanup()
-        for j in range(args.n_samples):
-            inp_batch = inps[j].unsqueeze(0).to(args.device)
+        for j in range(0, args.n_samples, args.batch_size):
+            inp_batch = inps[j: j + args.batch_size]
+            curr_batch_size = inp_batch.shape[0]
+            seq_len = inp_batch.shape[1]
+            position_ids = torch.arange(seq_len, dtype=torch.long, device=args.device).unsqueeze(0)
+            cos, sin = rotary_emb(inp_batch, position_ids)
             batch_kwargs = {
-                    k: prepare_batch_kwargs(v, args.device)
-                    for k, v in layer_kwargs.items()
+                    "use_cache": False,
+                    "past_key_values": None,
+                    "attention_mask": None,
+                    "position_ids": position_ids,
+                    "position_embeddings": (cos, sin)
                     }
-            batch_kwargs['use_cache'] = False
-            batch_kwargs['attention_mask'] = None
             out_batch = layer(inp_batch, **batch_kwargs)[0]
-            outs[j] = out_batch.squeeze(0)
+            for i in range(curr_batch_size):
+                outs[j + i] = out_batch[i]
             del inp_batch, batch_kwargs, out_batch
             cleanup()
         inps, outs = outs, inps

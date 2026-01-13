@@ -122,8 +122,9 @@ def find_linear_layers(module: nn.Module) -> Dict[str, nn.Linear]:
 def capture_initial_inputs(
         model: nn.Module,
         input_ids_list: List[torch.Tensor],
-        device: str = "cuda"
-        ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        device: str = "cuda",
+        batch_size: int = 1
+        ) -> Tuple[torch.Tensor, Dict[str, Any]]:
     """
     Captures the inputs to the FIRST layer of the model.
     This allows running layer-wise quantization sequentially.
@@ -135,6 +136,8 @@ def capture_initial_inputs(
     seq_len = input_ids_list[0].shape[1]
     hidden_dim = model.config.hidden_size
     dtype = next(model.parameters()).dtype
+
+    input_ids_tensor = torch.cat(input_ids_list, dim=0)
 
     inps = torch.zeros((n_samples, seq_len, hidden_dim), dtype=dtype, device=device)
 
@@ -150,23 +153,18 @@ def capture_initial_inputs(
             self.module = module
 
         def forward(self, inp, **kwargs):
-            inps[cache['i']: cache['i'] + 1] = inp
-            cache['i'] += 1
+            current_batch_size = inp.shape[0]
+            inps[cache['i']: cache['i'] + current_batch_size] = inp
+            cache['i'] += current_batch_size
 
             if cache['layer_kwargs'] is None:
                 cache['layer_kwargs'] = kwargs
             raise ValueError("Stop forward")
 
-        def __getattr__(self, name):
-            try:
-                return super().__getattr__(name)
-            except AttributeError:
-                return getattr(self.module, name)
-
     layers[0] = Catcher(layers[0])
     model_device = next(model.parameters()).device
-    for i, batch in enumerate(input_ids_list):
-        batch = batch.to(model_device)
+    for i in range(0, n_samples, batch_size):
+        batch = input_ids_tensor[i: i + batch_size].to(model_device)
         try:
             model(batch)
         except ValueError:
