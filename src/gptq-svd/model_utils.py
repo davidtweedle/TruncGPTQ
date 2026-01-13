@@ -161,7 +161,7 @@ def capture_initial_inputs(
                 cache['layer_kwargs'] = kwargs
             raise ValueError("Stop forward")
 
-        def __getattr(self, name):
+        def __getattr__(self, name):
             try:
                 return super().__getattr__(name)
             except AttributeError:
