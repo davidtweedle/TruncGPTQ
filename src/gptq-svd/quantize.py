@@ -115,10 +115,14 @@ def main():
 
                 position_ids = torch.arange(seq_len, dtype=torch.long, device=args.device).unsqueeze(0)
                 cos, sin = rotary_emb(batch_inp, position_ids)
+                mask = torch.tril(torch.ones((seq_len, seq_len), device=args.device))
+                min_dtype = torch.finfo(batch_inp.dtype).min
+                attention_mask = torch.zeros((1, 1, seq_len, seq_len), device=args.device, dtype=batch_inp.dtype)
+                attention_mask = attention_mask.masked_fill(mask == 0, min_dtype)
                 batch_kwargs = {
                         "use_cache": False,
                         "past_key_values": None,
-                        "attention_mask": None,
+                        "attention_mask": attention_mask,
                         "position_ids": position_ids,
                         "position_embeddings": (cos, sin)
                         }
@@ -221,10 +225,15 @@ def main():
             seq_len = inp_batch.shape[1]
             position_ids = torch.arange(seq_len, dtype=torch.long, device=args.device).unsqueeze(0)
             cos, sin = rotary_emb(inp_batch, position_ids)
+            mask = torch.tril(torch.ones((seq_len, seq_len), device=args.device))
+            min_dtype = torch.finfo(inp_batch.dtype).min
+            attention_mask = torch.zeros((1, 1, seq_len, seq_len), device=args.device, dtype=inp_batch.dtype)
+            attention_mask = attention_mask.masked_fill(mask == 0, min_dtype)
+
             batch_kwargs = {
                     "use_cache": False,
                     "past_key_values": None,
-                    "attention_mask": None,
+                    "attention_mask": attention_mask,
                     "position_ids": position_ids,
                     "position_embeddings": (cos, sin)
                     }
