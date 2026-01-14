@@ -198,7 +198,6 @@ def main():
                             block_size=1024,
                             R_x=shared_stats.get("R_x")
                             )
-                    module_stat["rank_kept"] = used_rank
                 elif args.mode == "gptq":
                     final_W = torch.zeros_like(W)
                     gptq_ref_fwrd(
