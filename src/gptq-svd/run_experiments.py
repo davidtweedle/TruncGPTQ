@@ -3,7 +3,6 @@ import json
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
-import sys
 
 # --- Configuration ---
 PYTHON_INTERPRETER = "python"
@@ -17,7 +16,7 @@ BASE_SAVE_DIR = Path(f"benchmark_results_{TIMESTAMP}")
 experiments = []
 
 for bits in [4, 3, 2]:
-    for base_eps in [1e-6, 1e-5, 1e-4, 1e-3]:
+    for base_eps in [1e-5, 1e-4, 1e-3]:
         for group in [-1, 128]:
             sym = True
             sym_label = "Sym" if sym else "Asym"
@@ -29,7 +28,8 @@ for bits in [4, 3, 2]:
                 "sym": sym,
                 "algo": "SVD-quant",
                 "adaptive_eps": True,
-                "eps": base_eps
+                "eps": base_eps,
+                "batch_size": 32
                 })
 
 def run_command(cmd_list):
@@ -71,6 +71,7 @@ def main():
                 f"--dataset {DATASET}",
                 f"--save_path {save_path}",
                 f"--device {DEVICE}",
+                f"--batch_size {exp['batch_size']}",
                 "--threshold_method energy",
                 "--sketch_ratio 1.0",
                 "--no_save"
