@@ -237,8 +237,13 @@ class Quantizer:
         self.w_bits = w_bits
         self.group_size = group_size
         self.sym = sym
-        self.max_q = 2 ** w_bits - 1
-        self.min_q = 0
+        if self.sym:
+            half_range = 2 ** (w_bits - 1) - 1
+            self.max_q = half_range
+            self.min_q = -half_range
+        else:
+            self.max_q = 2 ** w_bits - 1
+            self.min_q = 0
         self.scale = None
         self.zero = None
 
@@ -251,8 +256,9 @@ class Quantizer:
         w = weights.reshape(m, -1, g_size)
 
         if self.sym:
-            max_val = torch.amax(torch.abs(w), dim=2, keepdim=True)
-            self.scale = max_val / (2 ** (self.w_bits - 1) - 1)
+            x_abs_max = torch.amax(torch.abs(w), dim=2, keepdim=True)
+            x_abs_max = x_abs_max.clamp(min=1e-5)
+            self.scale = x_abs_max / self.max_q
             self.zero = torch.zeros_like(self.scale)
         else:
             mn = torch.amin(w, dim=2, keepdim=True)
