@@ -72,6 +72,7 @@ def main():
 
     if args.mode == "baseline":
         log_header("BASELINE EVALUATION")
+        model = model.to(args.device)
         ppl_baseline = eval_utils.evaluate_perplexity(model, tokenizer, device=args.device)
         logging.info(f"Baseline PPL: {ppl_baseline:.2f}")
         return
