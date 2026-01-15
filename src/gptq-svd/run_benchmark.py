@@ -37,7 +37,8 @@ for bits in [4, 3, 2]:
         "group": group,
         "sym": sym,
         "algo": "GPTQ",
-        "eps": 0.0
+        "eps": 0.0,
+        "batch_size": 32
         })
 
 for bits in [4, 3]:
@@ -51,8 +52,9 @@ for bits in [4, 3]:
         "sym": sym,
         "algo": "GPTQ",
         "group": group,
+        "batch_size": 32
         })
-        
+
 for bits in [4, 3, 2]:
     base_eps = 0.0001 if bits == 1 else 0.00001
     sym = False
@@ -65,7 +67,8 @@ for bits in [4, 3, 2]:
         "algo": "Spec-Quant",
         "group": group,
         "adaptive_eps": True,
-        "eps": base_eps
+        "eps": base_eps,
+        "batch_size": 32
         })
 
 for bits in [4, 3]:
@@ -80,7 +83,8 @@ for bits in [4, 3]:
         "algo": "Spec-Quant",
         "group": 128,
         "adaptive_eps": True,
-        "eps": base_eps
+        "eps": base_eps,
+        "batch_size": 32
         })
 
 
@@ -104,7 +108,7 @@ def run_command(cmd_list):
 
 
 def main():
-    print("--- Starting Batch Experiment Runner ---")
+    print("--- Starting Bechmark Run ---")
     print(f"Model: {MODEL_ID}")
     print(f"Dataset: {DATASET}")
     print(f"Output Directory: {BASE_SAVE_DIR}")
@@ -133,6 +137,7 @@ def main():
             cmd.append(f"--mode {exp['mode']}")
             cmd.append(f"--w_bits {exp['w_bits']}")
             cmd.append(f"--group_size {exp['group']}")
+            cmd.append(f"--batch_size {exp['batch_size']}")
 
             if exp["mode"] == "eigh":
                 cmd.append(f"--eps {exp['eps']}")
