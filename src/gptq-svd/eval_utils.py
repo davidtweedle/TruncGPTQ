@@ -19,7 +19,7 @@ def evaluate_perplexity(
         tokenizer,
         dataset: str = "wikitext2",
         device: str = "cuda",
-        batch_size=16,
+        batch_size=8,
         stride=512
         ) -> float:
     """
