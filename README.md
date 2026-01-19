@@ -24,20 +24,21 @@ TruncGPTQ is a drop-in replacement for the "Hessian Inverse" step of GPTQ, requi
 
 ## Benchmark Results (WikiText-2 test set Perplexity)
 *Evaluation performed on **Qwen3-8B**. Lower is better.*
+TBA
 
 | Method | Bit-Width | Mode | PPL | $\Delta$ vs FP16 |
 | :--- | :--- | :--- | :--- | :--- |
-| **FP16 Baseline** | 16-bit | - | **8.57** | - |
-| GPTQ | 4-bit | Asym | 8.75 | +0.18 |
-| **TruncGPTQ** | 4-bit | Asym | **8.64** | **+0.07** |
-| GPTQ | 4-bit | Sym | 8.92 | +0.35 |
-| **TruncGPTQ** | 4-bit | Sym | **8.66** | **+0.09** |
-| GPTQ | 3-bit | Asym | 9.59 | +1.02 |
-| **TruncGPTQ** | 3-bit | Asym | **9.20** | **+0.63** |
-| GPTQ | 3-bit | Sym | 10.25 | +1.68 |
-| **TruncGPTQ** | 3-bit | Sym | **9.85** | **+1.28** |
-| GPTQ | 2-bit | Asym | 24.98  | +16.41 |
-| **TruncGPTQ** | 2-bit | Asym | **21.65** | **+13.08** |
+| **FP16 Baseline** | 16-bit | - |  | - |
+| GPTQ | 4-bit | Asym |  | |
+| **TruncGPTQ** | 4-bit | Asym |  | |
+| GPTQ | 4-bit | Sym |  | |
+| **TruncGPTQ** | 4-bit | Sym |  |  |
+| GPTQ | 3-bit | Asym |  |  |
+| **TruncGPTQ** | 3-bit | Asym |  |  |
+| GPTQ | 3-bit | Sym |  |  |
+| **TruncGPTQ** | 3-bit | Sym |  | |
+| GPTQ | 2-bit | Asym |   |  |
+| **TruncGPTQ** | 2-bit | Asym |  | |
 
 
 ### Comparison of Standard GPTQ vs TruncGPTQ
