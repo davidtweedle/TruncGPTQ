@@ -1,8 +1,8 @@
-# TruncGPTQ: Quantization for LLMs using truncated LDL decomposition
+# TruncGPTQ: Quantization for LLMs using truncated spectral decomposition
 
 [License](LICENSE)
 
-**TruncGPTQ** is a numerically stable quantization framework for Large Language Models. It replaces the Cholesky-based solver in GPTQ with a truncated spectral approach that explicitly handles rank-deficiency. By explicitly handling rank-deficiency in the Hessian $H = X^TX$ where $X$ are the activations, TruncGPTQ preserves signal integrity where standard GPTQ injects noise.
+**TruncGPTQ** is a numerically stable quantization framework for Large Language Models. It replaces the Cholesky-based solver in GPTQ with a truncated spectral approach that explicitly handles rank-deficiency. By explicitly handling rank-deficiency in the Hessian $H = X^TX$ where $X$ are the activations, TruncGPTQ preserves signal integrity where standard GPTQ injects noise. TruncGPTQ is a drop-in replacement for the ``Hessian Inverse'' step of GPTQ, and no new kernels are required.
 
 ## Key Contributions
 
@@ -55,12 +55,12 @@ where $\Rho$ is upper-triangular and has positive diagonal. The matrix $\Rho$ ca
 
 Here is how GPTQ works.
 
-1a. $H = X^TX + \lambda I$
-1b. We may reorder the activations to better represent the important activations. In GPTQ, this is done by sorting according to the norms of the activations (the diagonal of $H$).
-2. Write $H = R^TR$ where $R$ is upper-triangular and has positive diagonal elements. GPTQ uses Cholesky factorization (which is the justification for adding $\lambda I$ in step 1 - if you don't Cholesky may fail to find a factorization)
-3. Compute $H^{-1}$ from $R$ using triangular solve
-4. Compute $H^{-1} = \Rho^T\Rho$ again using Cholesky factorization, where $\Rho$ is upper-triangular and has positive elements on the diagonal.
-5. $\Rho$ serves as the input to the quantization step, in which each column is quantized, and the errors are propogated to the unquantized columns.
+1. $H = X^TX + \lambda I$
+2. We may reorder the activations to better represent the important activations. In GPTQ, this is done by sorting according to the norms of the activations (the diagonal of $H$).
+3. Write $H = R^TR$ where $R$ is upper-triangular and has positive diagonal elements. GPTQ uses Cholesky factorization (which is the justification for adding $\lambda I$ in step 1 - if you don't Cholesky may fail to find a factorization)
+4. Compute $H^{-1}$ from $R$ using triangular solve
+5. Compute $H^{-1} = \Rho^T\Rho$ again using Cholesky factorization, where $\Rho$ is upper-triangular and has positive elements on the diagonal.
+6. $\Rho$ serves as the input to the quantization step, in which each column is quantized, and the errors are propogated to the unquantized columns.
 
 Here is how TruncGPTQ works.
 1. **Hessian calculation:** $H = X^TX$ (no damping)
