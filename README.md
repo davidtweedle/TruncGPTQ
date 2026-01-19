@@ -89,6 +89,7 @@ $$ S = \tilde{\Lambda}^{1/2} V^T. $$
 4. **Rank-revealing ordering:** We apply pivoted QR to $S$: 
 
 $$SP^T = QR, $$
+
 where $P$ is a permutation matrix, $Q$ is orthogonal, and $R$ is upper triangular.
 
 This greedily selects columns with the largest projection onto the orthogonal complement of the previously selected columns. This orders features by their conditional variance - prioritizing those that add the most new information and pushing highly correlated features to the end.
