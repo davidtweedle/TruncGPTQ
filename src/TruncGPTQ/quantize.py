@@ -11,7 +11,7 @@ from utils import get_args, setup_logging
 import data_utils
 import model_utils
 import eval_utils
-from gptq_utils import gptq_svd_qr_fwrd, Quantizer, gptq_ref_fwrd, Sketcher, process_sketch, process_hessian, process_hessian_alt, HessianAccumulator
+from gptq_utils import gptq_fwrd, Quantizer, Sketcher, process_sketch, process_hessian, process_hessian_alt, HessianAccumulator
 from model_utils import prepare_batch_kwargs
 
 def get_adaptive_eps(layer_name, base_eps):
@@ -199,20 +199,18 @@ def main():
 
                 used_rank = "N/A"
                 if args.mode in {"svd", "eigh"}:
-                    final_W, used_rank = gptq_svd_qr_fwrd(
+                    final_W, used_rank = gptq_fwrd(
                             weight_mat=W,
-                            R=shared_stats["R"],
+                            H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             perm=shared_stats["perm"],
-                            block_size=1024,
+                            block_size=128,
                             R_x=shared_stats.get("R_x")
                             )
                 elif args.mode == "gptq":
-                    final_W = torch.zeros_like(W)
-                    gptq_ref_fwrd(
-                            H_inv_chol=shared_stats["R"],
+                    final_W, _ = gptq_fwrd(
                             weight_mat=W,
-                            out_weight=final_W,
+                            H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             blocksize=128,
                             perm=shared_stats["perm"]

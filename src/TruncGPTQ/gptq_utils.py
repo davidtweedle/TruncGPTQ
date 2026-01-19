@@ -7,8 +7,7 @@ Includes reference implementation of regular gptq.
 """
 import os
 import math
-import gc
-from typing import Tuple, Optional, Generator, Union
+from typing import Tuple, Optional, Union
 import logging
 
 # Environment configuration (Must be before JAX import)
@@ -19,8 +18,6 @@ import torch
 from torch import nn
 import jax
 from jax.dlpack import from_dlpack
-import triton
-from triton import language as tl
 
 # JAX Configuration
 # Enable x64 for precision in QR decomposition
@@ -291,200 +288,35 @@ def log_quantization_error(
     relative_error = (y_diff_norm / y_orig_norm).item()
     logging.info(f"   [Metric] Relative prediction error: {relative_error:.6f}")
 
-
 # ==============================================================================
-# TRITON KERNELS
-# ==============================================================================
-
-@triton.jit
-def gptq_block_kernel(
-        W_ptr,
-        Q_ptr,
-        E_ptr,
-        R_ptr,
-        Scales_ptr,
-        Zeros_ptr,
-        stride_w_row, stride_w_col,
-        stride_q_row, stride_q_col,
-        stride_e_row, stride_e_col,
-        stride_r_row, stride_r_col,
-        stride_s_row, stride_s_col,
-        stride_z_row, stride_z_col,
-        n_rows,
-        BLOCK_SIZE: tl.constexpr,
-        BLOCK_ROWS: tl.constexpr,
-        MIN_VAL: tl.constexpr,
-        MAX_VAL: tl.constexpr
-        ):
-    """
-    Triton kernel for block-wise GPTQ/LDLQ block quantization with error propogation
-
-    Operations:
-    1. Quantize a column 'k'
-    2. Compute error 'E'.
-    3. Propogate 'E' to future columns within block
-    4. Update W[:, j] -= E * (R[k, j] / R[k, k])
-    """
-    pid = tl.program_id(0)
-    row_start = pid * BLOCK_ROWS
-    offsets_rows = row_start + tl.arange(0, BLOCK_ROWS)
-    mask_rows = offsets_rows < n_rows
-
-    offsets_cols = tl.arange(0, BLOCK_SIZE)
-
-    # Pointers for weight block
-    offsets_cols = tl.arange(0, BLOCK_SIZE)
-    w_ptrs = W_ptr + (offsets_rows[:, None] * stride_w_row) + (offsets_cols[None, :] * stride_w_col)
-    s_ptrs = Scales_ptr + (offsets_rows[:, None] * stride_s_row) + (offsets_cols[None, :] * stride_s_col)
-    z_ptrs = Zeros_ptr + (offsets_rows[:, None] * stride_z_row) + (offsets_cols[None, :] * stride_z_col)
-
-    w_data = tl.load(w_ptrs, mask=mask_rows[:, None], other=0.0)
-    s_data = tl.load(s_ptrs, mask=mask_rows[:, None], other=1.0)
-    z_data = tl.load(z_ptrs, mask=mask_rows[:, None], other=0.0)
-
-    # Iterative quantization within block
-    for k in range(BLOCK_SIZE):
-        mask_k = (offsets_cols == k)[None, :]
-
-        # select current column
-        w_col = tl.sum(w_data * mask_k, axis=1)
-        s_col = tl.sum(s_data * mask_k, axis=1)
-        z_col = tl.sum(z_data * mask_k, axis=1)
-
-        # quantize
-        q_int = tl.floor(w_col / s_col + z_col + 0.5)
-        q_int = tl.clamp(q_int, float(MIN_VAL), float(MAX_VAL))
-        q_val = (q_int - z_col) * s_col
-
-        error = w_col - q_val
-
-        # Write output and error
-        e_out_ptrs = E_ptr + (offsets_rows * stride_e_row) + (k * stride_e_col)
-        tl.store(e_out_ptrs, error, mask=mask_rows)
-
-        q_out_ptrs = Q_ptr + (offsets_rows * stride_q_row) + (k * stride_q_col)
-        tl.store(q_out_ptrs, q_val, mask=mask_rows)
-
-        # Fetch R info where R^T R ~ (X^TX)^{-1}
-        r_ptrs = R_ptr + (k * stride_r_row) + (offsets_cols * stride_r_col)
-        r_row = tl.load(r_ptrs)
-
-        # diagonal element for scaling
-        diag_mask = (offsets_cols == k)
-        diag = tl.sum(r_row * diag_mask, axis=0)
-        inv_diag = 1.0 / diag
-        # better to have r_row / diag ?
-
-        correction_vec = r_row * inv_diag
-
-        # error propogation
-        err_broad = error[:, None]
-        corr_broad = correction_vec[None, :]
-        delta = err_broad * corr_broad
-
-        # apply update to future columns
-        update_mask = offsets_cols > k
-        w_data = tl.where(update_mask[None, :], w_data - delta, w_data)
-
-
-def next_power_of_2(x: int) -> int:
-    return 1 if x == 0 else 2 ** (x - 1).bit_length()
-
-
-def triton_process_block(
-        w_block: torch.Tensor,
-        s_block: torch.Tensor,
-        z_block: torch.Tensor,
-        R_block: torch.Tensor,
-        quantizer: 'Quantizer'
-        ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Wrapper to launch Triton quantization kernel on a block of weights.
-    Handles padding to nearest power of 2 for efficiency.
-    """
-    out_features, n_cols = w_block.shape
-    target_block_size = next_power_of_2(n_cols)
-    if target_block_size < 16:
-        target_block_size = 16
-
-    # Padding
-    pad_cols = target_block_size - n_cols
-    if pad_cols > 0:
-        w_input = torch.nn.functional.pad(w_block, (0, pad_cols), mode='constant', value=0.0)
-        s_input = torch.nn.functional.pad(s_block, (0, pad_cols), mode='constant', value=1.0)
-        z_input = torch.nn.functional.pad(z_block, (0, pad_cols), mode='constant', value=0.0)
-        R_input = torch.nn.functional.pad(R_block, (0, pad_cols, 0, pad_cols), mode='constant', value=1.0)
-    else:
-        w_input = w_block
-        s_input = s_block
-        z_input = z_block
-        R_input = R_block
-
-    q_output = torch.empty_like(w_input)
-    e_output = torch.empty_like(w_input)
-
-    BLOCK_ROWS = 64
-    grid = lambda meta: (triton.cdiv(out_features, BLOCK_ROWS),)
-
-    # add scales and zeros stride, etc.
-    gptq_block_kernel[grid](
-            w_input, q_output, e_output, R_input,
-            s_input, z_input,
-            w_input.stride(0), w_input.stride(1),
-            q_output.stride(0), q_output.stride(1),
-            e_output.stride(0), e_output.stride(1),
-            R_input.stride(0), R_input.stride(1),
-            s_input.stride(0), s_input.stride(1),
-            z_input.stride(0), z_input.stride(1),
-            out_features,
-            BLOCK_SIZE=target_block_size,
-            BLOCK_ROWS=BLOCK_ROWS,
-            MIN_VAL=quantizer.min_q,
-            MAX_VAL=quantizer.max_q,
-            )
-
-    # Unpad
-    if pad_cols > 0:
-        q_final = q_output[:, :n_cols]
-        e_final = e_output[:, :n_cols]
-    else:
-        q_final = q_output
-        e_final = e_output
-
-    return q_final, e_final
-
-
-# ==============================================================================
-# MAIN ALGORITHM: SVD + QR + TRITON
+# GPTQ Updates
 # ==============================================================================
 
-def gptq_svd_qr_fwrd(
+def gptq_fwrd(
         weight_mat: torch.Tensor,
-        R: torch.Tensor,
+        H_inv_sqrt: torch.Tensor,
         quantizer: Quantizer,
         perm: torch.Tensor,
-        block_size: int = 1024,
+        block_size: int = 128,
         R_x: Optional[torch.Tensor] = None
         ) -> Tuple[torch.Tensor, int]:
     """
-    SVD/QR with pivoting based GPTQ using pre-computed sketch
+    Unified GPTQ implementation
 
-    1. Decomposes Y = USV^T
-    2. Selects rank based on threshold
-    3. Uses JAX QR with pivoting to compute most important input channels
-    4. Computes inverse Cholesky factor R from SVD components
-    5. Runs triton kernel for block-wise quantization from R
+    - Supports rank-reduced H_inv_sqrt
+    - Supports error logging
     """
 
     out_features, in_features = weight_mat.shape
     device = weight_mat.device
     dtype = weight_mat.dtype
 
-    R = R.to(dtype)
+    H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=dtype)
 
-    current_rank = R.shape[0]
+    current_rank = H_inv_sqrt.shape[0]
 
-    logging.info(f"   Rank percent used: {float(current_rank) / R.shape[1]}")
+    if current_rank < in_features:
+        logging.info(f"   Rank percent used: {float(current_rank) / in_features:.2%}")
 
     # Block wise quantization
     quantizer.find_params(weight_mat)
@@ -493,117 +325,51 @@ def gptq_svd_qr_fwrd(
     S = S_full[:, perm].clone()
     Z = Z_full[:, perm].clone()
 
-    Q_W = torch.zeros_like(W)
-
-    for i in range(0, current_rank, block_size):
-        j = min(i + block_size, current_rank)
-        w_block = W[:, i:j]
-        s_block = S[:, i:j]
-        z_block = Z[:, i:j]
-        R_block_diag = R[i:j, i:j]
-
-        # Run Triton kernel
-        w_block_quantized, E_block = triton_process_block(
-                w_block,
-                s_block,
-                z_block,
-                R_block_diag,
-                quantizer
-                )
-        Q_W[:, i:j] = w_block_quantized
-
-        # Propogate error to remaining blocks
-        if j < in_features:
-            R_cross = R[i:j, j:]
-            R_diags = torch.diagonal(R_block_diag)
-            Scale_Mat = R_cross / R_diags.unsqueeze(1)
-            Global_Delta = E_block @ Scale_Mat
-            W[:, j:] -= Global_Delta
-
-    # Quantize remaining weights directly
-    if current_rank < in_features:
-        W_tail = W[:, current_rank:]
-        S_tail = S[:, current_rank:]
-        Z_tail = Z[:, current_rank:]
-        q_tail = torch.round(W_tail / S_tail + Z_tail).clamp(quantizer.min_q, quantizer.max_q)
-        Q_W[:, current_rank:] = (q_tail - Z_tail) * S_tail
-    
-
-    # restore original column order
-    inv_perm = torch.argsort(perm)
-    final_W = Q_W[:, inv_perm]
-
-    if R_x is not None:
-        log_quantization_error(weight_mat, final_W, R_x, perm)
-
-    return final_W, current_rank
-
-
-# ==============================================================================
-# REFERENCE IMPLEMENTATION
-# ==============================================================================
-
-def gptq_ref_fwrd(
-        H_inv_chol: torch.Tensor,
-        weight_mat: torch.Tensor,
-        out_weight: torch.Tensor,
-        quantizer: Quantizer,
-        blocksize: int,
-        perm: torch.Tensor,
-        ):
-    """
-    Standard GPTQ/Block LDLQ algorithm (for benchmarking).
-    Accumulates H = X^TX and performs Cholesky based quantization.
-    """
-    m, n = weight_mat.shape
-    device = weight_mat.device
-    dtype = weight_mat.dtype
-
-    H_inv_chol = H_inv_chol.to(dtype)
-
-    quantizer.find_params(weight_mat)
-    S_full, Z_full = quantizer.get_expanded_params(m, n)
-
-    W = weight_mat[:, perm].clone()
-    S = S_full[:, perm].clone()
-    Z = Z_full[:, perm].clone()
-
     Q_final = torch.zeros_like(W)
-    Losses = torch.zeros_like(W)
 
-    # Standard loop
-    for i1 in range(0, n, blocksize):
-        i2 = min(i1 + blocksize, n)
+    for i1 in range(0, current_rank, block_size):
+        i2 = min(i1 + block_size, current_rank)
         count = i2 - i1
-        W1 = W[:, i1:i2].clone()
-        S1 = S[:, i1:i2].clone()
-        Z1 = Z[:, i1:i2].clone()
+
+        W1 = W[:, i1:i2]
+        S1 = S[:, i1:i2]
+        Z1 = Z[:, i1:i2]
+        Hinv1 = H_inv_sqrt[i1:i2, i1:i2]
+
         Q1 = torch.zeros_like(W1)
         Err1 = torch.zeros_like(W1)
-        Losses1 = torch.zeros_like(W1)
-        Hinv1 = H_inv_chol[i1:i2, i1:i2]
 
         for i in range(count):
             w = W1[:, i]
             d = Hinv1[i, i]
             s = S1[:, i]
             z = Z1[:, i]
+
             q = torch.round(w / s + z).clamp(quantizer.min_q, quantizer.max_q)
             q_dequant = (q - z) * s
             Q1[:, i] = q_dequant
 
-            Losses1[:, i] = (w - q_dequant) ** 2 / d ** 2
             err1 = (w - q_dequant) / d
             W1[:, i:] -= err1.unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
             Err1[:, i] = err1
-
         Q_final[:, i1:i2] = Q1
-        Losses[:, i1:i2] = Losses1 / 2
-        if i2 < n:
-            W[:, i2:] -= Err1.matmul(H_inv_chol[i1:i2, i2:])
 
+        if i2 < in_features:
+            W[:, i2:] -= Err1.matmul(H_inv_sqrt[i1:i2, i2:])
+
+    if current_rank < in_features:
+        W_tail = W[:, current_rank:]
+        S_tail = S[:, current_rank:]
+        Z_tail = Z[:, current_rank:]
+
+        q_tail = torch.round(W_tail / S_tail + Z_tail).clamp(quantizer.min_q, quantizer.max_q)
+        Q_final[:, current_rank:] = (q_tail - Z_tail) * S_tail
+
+    # restore original column order
     inv_perm = torch.argsort(perm)
-    out_weight[:] = Q_final[:, inv_perm]
+    final_W = Q_final[:, inv_perm]
 
-    del W, Q_final, Losses
-    torch.cuda.empty_cache()
+    if R_x is not None:
+        log_quantization_error(weight_mat, final_W, R_x, perm)
+
+    return final_W, current_rank
