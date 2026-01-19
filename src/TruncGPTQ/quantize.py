@@ -221,7 +221,7 @@ def main():
                             weight_mat=W,
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
-                            blocksize=128,
+                            block_size=128,
                             perm=shared_stats["perm"]
                             )
                 elif args.mode == "test":
