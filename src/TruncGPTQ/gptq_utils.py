@@ -309,73 +309,76 @@ def gptq_fwrd(
     allow_tf32 = torch.backends.cuda.matmul.allow_tf32
     torch.backends.cuda.matmul.allow_tf32 = False
 
-    out_features, in_features = weight_mat.shape
-    device = weight_mat.device
-    orig_dtype = weight_mat.dtype
-    weight_mat = weight_mat.to(device=device, dtype=torch.float32)
+    try:
+        out_features, in_features = weight_mat.shape
+        device = weight_mat.device
+        orig_dtype = weight_mat.dtype
+        weight_mat = weight_mat.to(device=device, dtype=torch.float32)
 
-    H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=torch.float32)
+        H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=torch.float32)
 
-    current_rank = H_inv_sqrt.shape[0]
+        current_rank = H_inv_sqrt.shape[0]
 
-    if current_rank < in_features:
-        logging.info(f"   Rank percent used: {float(current_rank) / in_features:.2%}")
+        if current_rank < in_features:
+            logging.info(f"   Rank percent used: {float(current_rank) / in_features:.2%}")
 
-    # Block wise quantization
-    quantizer.find_params(weight_mat)
-    S_full, Z_full = quantizer.get_expanded_params(out_features, in_features)
-    W = weight_mat[:, perm].clone()
-    S = S_full[:, perm].to(device=device, dtype=torch.float32).clone()
-    Z = Z_full[:, perm].to(device=device, dtype=torch.float32).clone()
+        # Block wise quantization
+        quantizer.find_params(weight_mat)
+        S_full, Z_full = quantizer.get_expanded_params(out_features, in_features)
+        W = weight_mat[:, perm].clone()
+        S = S_full[:, perm].to(device=device, dtype=torch.float32).clone()
+        Z = Z_full[:, perm].to(device=device, dtype=torch.float32).clone()
 
-    Q_final = torch.zeros_like(W)
+        Q_final = torch.zeros_like(W)
 
-    for i1 in range(0, current_rank, block_size):
-        i2 = min(i1 + block_size, current_rank)
-        count = i2 - i1
+        for i1 in range(0, current_rank, block_size):
+            i2 = min(i1 + block_size, current_rank)
+            count = i2 - i1
 
-        W1 = W[:, i1:i2]
-        S1 = S[:, i1:i2]
-        Z1 = Z[:, i1:i2]
-        Hinv1 = H_inv_sqrt[i1:i2, i1:i2]
+            W1 = W[:, i1:i2]
+            S1 = S[:, i1:i2]
+            Z1 = Z[:, i1:i2]
+            Hinv1 = H_inv_sqrt[i1:i2, i1:i2]
 
-        Q1 = torch.zeros_like(W1)
-        Err1 = torch.zeros_like(W1)
+            Q1 = torch.zeros_like(W1)
+            Err1 = torch.zeros_like(W1)
 
-        for i in range(count):
-            w = W1[:, i]
-            d = Hinv1[i, i]
-            s = S1[:, i]
-            z = Z1[:, i]
+            for i in range(count):
+                w = W1[:, i]
+                d = Hinv1[i, i]
+                s = S1[:, i]
+                z = Z1[:, i]
 
-            q = torch.round(w / s + z).clamp(quantizer.min_q, quantizer.max_q)
-            q_dequant = (q - z) * s
-            Q1[:, i] = q_dequant
+                q = torch.round(w / s + z).clamp(quantizer.min_q, quantizer.max_q)
+                q_dequant = (q - z) * s
+                Q1[:, i] = q_dequant
 
-            err1 = (w - q_dequant) / d
-            delta = err1.unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
-            W1[:, i:] -= delta
-            Err1[:, i] = err1
-        Q_final[:, i1:i2] = Q1
+                err1 = (w - q_dequant) / d
+                delta = err1.unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
+                W1[:, i:] -= delta
+                Err1[:, i] = err1
+            Q_final[:, i1:i2] = Q1
 
-        if i2 < in_features:
-            block_update = Err1.matmul(H_inv_sqrt[i1:i2, i2:])
-            W[:, i2:] -= block_update
+            if i2 < in_features:
+                block_update = Err1.matmul(H_inv_sqrt[i1:i2, i2:])
+                W[:, i2:] -= block_update
 
-    if current_rank < in_features:
-        W_tail = W[:, current_rank:]
-        S_tail = S[:, current_rank:]
-        Z_tail = Z[:, current_rank:]
+        if current_rank < in_features:
+            W_tail = W[:, current_rank:]
+            S_tail = S[:, current_rank:]
+            Z_tail = Z[:, current_rank:]
 
-        q_tail = torch.round(W_tail / S_tail + Z_tail).clamp(quantizer.min_q, quantizer.max_q)
-        Q_final[:, current_rank:] = (q_tail - Z_tail) * S_tail
+            q_tail = torch.round(W_tail / S_tail + Z_tail).clamp(quantizer.min_q, quantizer.max_q)
+            Q_final[:, current_rank:] = (q_tail - Z_tail) * S_tail
 
-    # restore original column order
-    inv_perm = torch.argsort(perm)
-    final_W = Q_final[:, inv_perm]
-    torch.cuda.synchronize()
+        # restore original column order
+        inv_perm = torch.argsort(perm)
+        final_W = Q_final[:, inv_perm]
+        torch.cuda.synchronize()
 
-    if R_x is not None:
-        log_quantization_error(weight_mat, final_W, R_x, perm)
+        if R_x is not None:
+            log_quantization_error(weight_mat, final_W, R_x, perm)
 
-    return final_W.to(dtype=orig_dtype), current_rank
+        return final_W.to(dtype=orig_dtype), current_rank
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = allow_tf32
