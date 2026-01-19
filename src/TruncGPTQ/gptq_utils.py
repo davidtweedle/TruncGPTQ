@@ -462,6 +462,7 @@ def gptq_fwrd(
         quantizer: Quantizer,
         perm: torch.Tensor,
         block_size: int = 128,
+        use_triton: bool = True,
         R_x: Optional[torch.Tensor] = None
         ) -> Tuple[torch.Tensor, int]:
     """
@@ -503,23 +504,44 @@ def gptq_fwrd(
             S1 = S[:, i1:i2]
             Z1 = Z[:, i1:i2]
             Hinv1 = H_inv_sqrt[i1:i2, i1:i2]
+            if use_triton:
+                w_block_quantized, E_block = triton_process_block(
+                        W1,
+                        S1,
+                        Z1,
+                        Hinv1,
+                        quantizer
+                        )
 
-            w_block_quantized, E_block = triton_process_block(
-                    W1,
-                    S1,
-                    Z1,
-                    Hinv1,
-                    quantizer
-                    )
+            else:
+                Q1 = torch.zeros_like(W1)
+                Err1 = torch.zeros_like(W1)
+                
+                for i in range(count):
+                    w = W1[:, i]
+                    d = Hinv1[i, i]
+                    s = S1[:, i]
+                    z = Z1[:, i]
 
-            diag_vals = torch.diagonal(Hinv1)
-
+                    q = torch.round(w / s + z).clamp(quantizer.min_q, quantizer.max_q)
+                    q_dequant = (q - z) * s
+                    Q1[:, i] = q_dequant
+                    err = (w - q_dequant) / d
+                    delta = err.unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
+                    W1[:, i:] -= delta
+                    Err1[:, i] = err
+                w_block_quantized = Q1
+                E_block = Err1
             Q_final[:, i1:i2] = w_block_quantized
 
             if i2 < in_features:
-                H_inv_sqrt_cross = H_inv_sqrt[i1:i2, i2:]
-                Scale_mat = H_inv_sqrt_cross / diag_vals.unsqueeze(1)
-                Global_delta = E_block @ Scale_mat
+                if use_triton:
+                    H_inv_sqrt_cross = H_inv_sqrt[i1:i2, i2:]
+                    diag_vals = torch.diagonal(Hinv1)
+                    Scale_mat = H_inv_sqrt_cross / diag_vals.unsqueeze(1)
+                    Global_delta = E_block @ Scale_mat
+                else:
+                    Global_delta = E_block.matmul(H_inv_sqrt[i1:i2, i2:])
                 W[:, i2:] -= Global_delta
 
         if current_rank < in_features:
