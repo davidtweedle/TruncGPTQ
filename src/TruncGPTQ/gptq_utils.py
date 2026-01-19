@@ -306,13 +306,15 @@ def gptq_fwrd(
     - Supports rank-reduced H_inv_sqrt
     - Supports error logging
     """
+    allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = False
 
     out_features, in_features = weight_mat.shape
     device = weight_mat.device
     orig_dtype = weight_mat.dtype
     weight_mat = weight_mat.to(device=device, dtype=torch.float32)
 
-    H_inv_sqrt = H_inv_sqrt.to(device=device)
+    H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=torch.float32)
 
     current_rank = H_inv_sqrt.shape[0]
 
@@ -351,14 +353,14 @@ def gptq_fwrd(
             Q1[:, i] = q_dequant
 
             err1 = (w - q_dequant) / d
-            delta = err1.to(Hinv1.dtype).unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
-            W1[:, i:] -= delta.to(dtype=torch.float32)
-            Err1[:, i] = err1.to(dtype=torch.float32)
+            delta = err1.unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
+            W1[:, i:] -= delta
+            Err1[:, i] = err1
         Q_final[:, i1:i2] = Q1
 
         if i2 < in_features:
-            block_update = Err1.to(H_inv_sqrt.dtype).matmul(H_inv_sqrt[i1:i2, i2:])
-            W[:, i2:] -= block_update.to(dtype=torch.float32)
+            block_update = Err1.matmul(H_inv_sqrt[i1:i2, i2:])
+            W[:, i2:] -= block_update
 
     if current_rank < in_features:
         W_tail = W[:, current_rank:]
@@ -371,8 +373,9 @@ def gptq_fwrd(
     # restore original column order
     inv_perm = torch.argsort(perm)
     final_W = Q_final[:, inv_perm]
+    torch.cuda.synchronize()
 
     if R_x is not None:
         log_quantization_error(weight_mat, final_W, R_x, perm)
 
-    return final_W, current_rank
+    return final_W.to(dtype=orig_dtype), current_rank
