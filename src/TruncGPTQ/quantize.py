@@ -222,7 +222,7 @@ def main():
                             weight_mat=W,
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
-                            block_size=128,
+                            block_size=1024,
                             use_triton=False,
                             perm=shared_stats["perm"]
                             )
