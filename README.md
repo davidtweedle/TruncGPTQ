@@ -40,6 +40,8 @@ TruncGPTQ is a drop-in replacement for the "Hessian Inverse" step of GPTQ, requi
 | GPTQ | 2-bit | Asym | 24.88  | +16.31  |
 | **TruncGPTQ** | 2-bit | Asym | 21.63  | +13.06 |
 
+> Methodology Note: To ensure a rigorous comparison of solver behaviour, both the GPTQ Baseline and TruncGPTQ utilize ActOrder Sorting (sorting weights by importance) but maintain Static Groups (sequential grouping). This ensures both methods have identical inference speed and require no `g_idx` overhead, isolating the improvement strictly to the Solver Algorithm (Rank vs Norm, Truncation vs Damping).
+
 
 ### Comparison of Standard GPTQ vs TruncGPTQ
 
@@ -123,7 +125,8 @@ python TruncGPTQ/src/TruncGPTQ/run_benchmark.py
 * Tested Hardware: Currently this implementation is validated specifically for Nvidia A100 (40GB). Performance and compatibility on other architectures are not yet guaranteed.
 * Model Support: Development has been focused on **Qwen3-8B** architecture.
 * Statistical Significance: Results reflect single-run experiments. Median results over multiple seeds are pending.
-* Computational Cost: The quantization process uses Eigendecomposition (torch.eigh), once, one QR with pivoting, and one regular QR, as opposed to two Cholesky factorizations for GPTQ. This makes it about 1.5X slower than regular GPTQ. This has zero impact on inference speed.
+* Computational Cost: The quantization process uses Eigendecomposition (torch.eigh), once, one QR with pivoting, and one regular QR, as opposed to two Cholesky factorizations for GPTQ. This makes it about 2X slower than regular GPTQ. This has zero impact on inference speed.
+* Both the GPTQ baseline and TruncGPTQ were tested by reordering the activations but keeping static groups (scaling factors were computed before sorting)
 * The truncation tolerance $\epsilon$ is selected from a small logarithmic grid.
 
 ## Roadmap: Future developments
