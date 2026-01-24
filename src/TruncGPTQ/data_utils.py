@@ -78,7 +78,7 @@ def get_wikitext2(
 
 
 def get_c4(
-        tokenizer: PreTrainedTokenizer,
+        tokenizer: PreTrainedTokenizerBase,
         n_samples: int,
         seq_len: int,
         seed: int = 42
