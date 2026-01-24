@@ -72,7 +72,6 @@ def main():
 
     if args.mode == "baseline":
         log_header("BASELINE EVALUATION")
-        model = model.to(args.device)
         ppl_baseline = eval_utils.evaluate_perplexity(model, tokenizer, device=args.device)
         logging.info(f"Baseline PPL: {ppl_baseline:.2f}")
 
@@ -95,7 +94,6 @@ def main():
             )
     outs = torch.zeros_like(inps)
     layers = model_utils.get_layers(model)
-    rotary_emb = model.model.rotary_emb
 
     log_header(f"PIPELINE: {args.mode.upper()}")
     start_global = time.time()
@@ -138,7 +136,7 @@ def main():
                 handles.append(submodule.register_forward_hook(h_hook))
             pbar = tqdm(range(0, args.n_samples, args.batch_size), desc="  Accumulating", leave=False)
             for j in pbar:
-                batch_inp = inps[j: j + args.batch_size]
+                batch_inp = inps[j: j + args.batch_size].to(args.device)
                 curr_batch_size = batch_inp.shape[0]
                 seq_len = batch_inp.shape[1]
                 batch_kwargs = {k: prepare_batch_kwargs(v, args.device) for k, v in layer_kwargs.items()}
@@ -236,14 +234,14 @@ def main():
             del shared_stats
             cleanup()
         for j in range(0, args.n_samples, args.batch_size):
-            inp_batch = inps[j: j + args.batch_size]
+            inp_batch = inps[j: j + args.batch_size].to(args.device)
+            cur_batch_size = inp_batch.shape[0]
             batch_kwargs = {k: prepare_batch_kwargs(v, args.device) for k, v in layer_kwargs.items()}
             batch_kwargs["use_cache"] = False
             out_batch = layer(inp_batch, **batch_kwargs)
             if isinstance(out_batch, tuple):
                 out_batch = out_batch[0]
-            for idx in range(curr_batch_size):
-                outs[j + idx] = out_batch[idx]
+            outs[j: j + cur_batch_size] = out_batch.cpu()
             del inp_batch, batch_kwargs, out_batch
             cleanup()
         inps, outs = outs, inps
@@ -274,7 +272,6 @@ def main():
     else:
         logging.info("Skipping model weight save (--no_save was set).")
     log_substep("Running final evaluation...")
-    model.to(args.device)
 
     ppl_q = eval_utils.evaluate_perplexity(model, tokenizer, device=args.device)
     logging.info(f"Final Quantized PPL: {ppl_q:.4f}")

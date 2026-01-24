@@ -8,31 +8,45 @@ for quantization.
 import random
 import torch
 from datasets import load_dataset
-from transformers import PreTrainedTokenizer
-from typing import List
+from transformers import PreTrainedTokenizerBase
+from typing import List, Literal
 import logging
+
+logger = logging.getLogger(__name__)
 
 
 def get_loaders(
         name: str,
-        tokenizer: PreTrainedTokenizer,
+        tokenizer: PreTrainedTokenizerBase,
         n_samples: int = 128,
         seq_len: int = 2048,
         seed: int = 42
         ) -> List[torch.Tensor]:
     """
     Factory function to get data loaders for supported datasets.
+    Args:
+        name: Name of the dataset to load. Supported: "wikitext2", "c4".
+        tokenizer: The tokenizer to use for processing text.
+        n_samples: Number of samples to collect for calibration.
+        seq_len: The sequence length (context window) for each sample.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        A list of tensors, where each tensor has shape (1, seq_len).
+
+    Raises:
+        ValueError: If an unsupported dataset name is provided.
     """
-    if name == "wikitext2":
+    if name.lower() == "wikitext2":
         return get_wikitext2(tokenizer, n_samples, seq_len, seed)
-    elif name == "c4":
+    elif name.lower() == "c4":
         return get_c4(tokenizer, n_samples, seq_len, seed)
     else:
-        raise ValueError(f"Unknown dataset: {name}")
+        raise ValueError(f"Unknown dataset: {name}. Supported: 'wikitext2', 'c4'")
 
 
 def get_wikitext2(
-        tokenizer: PreTrainedTokenizer,
+        tokenizer: PreTrainedTokenizerBase,
         n_samples: int,
         seq_len: int,
         seed: int = 42

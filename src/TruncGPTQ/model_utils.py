@@ -73,6 +73,13 @@ def get_layers(model: nn.Module) -> nn.ModuleList:
 
     raise ValueError("Could not find layers in model architecture")
 
+def get_embeddings(model: nn.Module) -> nn.Module:
+    if hasattr(model, "get_input_embeddings"):
+        return model.get_input_embeddings()
+    if hasattr(model, "model") and hasattr(model.model, "embed_tokens"):
+        return model.model.embed_tokens
+    raise ValueError("Could not find embedding layer")
+
 
 def get_sequenced_groups(layer: nn.Module) -> List[List[str]]:
     """
@@ -131,6 +138,8 @@ def capture_initial_inputs(
     """
     logging.info("Capturing calibration inputs...")
     layers = get_layers(model)
+    embed_layer = get_embeddings(model)
+    buffer_device = "cpu"
 
     n_samples = len(input_ids_list)
     seq_len = input_ids_list[0].shape[1]
@@ -139,7 +148,15 @@ def capture_initial_inputs(
 
     input_ids_tensor = torch.cat(input_ids_list, dim=0)
 
-    inps = torch.zeros((n_samples, seq_len, hidden_dim), dtype=dtype, device=device)
+    inps = torch.zeros((n_samples, seq_len, hidden_dim), dtype=dtype, device=buffer_device)
+    original_embed_device = next(embed_layer.parameters()).device
+    embed_layer = embed_layer.to(device)
+    original_layer0_device = next(layers[0].parameters()).device
+    layers[0] = layers[0].to(device)
+    rotary_moved = False
+    if hasattr(model, "model") and hasattr(model.model, "rotary_emb"):
+        model.model.rotary_emb = model.model.rotary_emb.to(device)
+        rotary_moved = True
 
     cache = {'i': 0, 'layer_kwargs': None}
 
@@ -154,11 +171,11 @@ def capture_initial_inputs(
 
         def forward(self, inp, **kwargs):
             current_batch_size = inp.shape[0]
-            inps[cache['i']: cache['i'] + current_batch_size] = inp
+            inps[cache['i']: cache['i'] + current_batch_size] = inp.to(buffer_device)
             cache['i'] += current_batch_size
 
             if cache['layer_kwargs'] is None:
-                cache['layer_kwargs'] = kwargs
+                cache['layer_kwargs'] = prepare_batch_kwargs(kwargs, buffer_device)
             raise ValueError("Stop forward")
 
         def __getattr__(self, name):
@@ -168,7 +185,6 @@ def capture_initial_inputs(
                 return getattr(self.module, name)
 
     layers[0] = Catcher(layers[0])
-    model_device = next(model.parameters()).device
     for i in range(0, n_samples, batch_size):
         batch = input_ids_tensor[i: i + batch_size].to(model_device)
         try:
@@ -177,5 +193,11 @@ def capture_initial_inputs(
             pass
     layers[0] = layers[0].module
 
-    print(f"[MODEL] Captured {n_samples} input sequences.")
+    embed_layer = embed_layer.to(original_embed_device)
+    layers[0] = layers[0].to(original_layer0_device)
+    if rotary_moved:
+        model.model.rotary_emb = model.model.rotary_emb.to(original_layer0_device)
+    cleanup()
+
+    logging.info(f"  [MODEL] Captured {n_samples} input sequences on {buffer_device}")
     return inps, cache['layer_kwargs']
