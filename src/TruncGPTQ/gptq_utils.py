@@ -313,7 +313,7 @@ def gptq_cross_kernel(
     pid_col = tl.program_id(1)
 
     rows = pid_row * BLOCK_ROWS + tl.arange(0, BLOCK_ROWS)
-    dst_cols = pid_col * BLOCK_DST + tl.arange(BLOCK_DST)
+    dst_cols = pid_col * BLOCK_DST + tl.arange(0, BLOCK_DST)
     src_cols = tl.arange(0, BLOCK_SRC)
 
     row_mask = rows < n_rows
