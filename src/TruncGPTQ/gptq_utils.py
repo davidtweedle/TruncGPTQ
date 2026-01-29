@@ -410,7 +410,6 @@ def gptq_block_kernel(
 
         # Write output and error
         e_out_ptrs = E_ptr + (offsets_rows * stride_e_row) + (k * stride_e_col)
-        tl.store(e_out_ptrs, error, mask=mask_rows)
 
         q_out_ptrs = Q_ptr + (offsets_rows * stride_q_row) + (k * stride_q_col)
         tl.store(q_out_ptrs, q_val, mask=mask_rows)
@@ -426,6 +425,7 @@ def gptq_block_kernel(
         # better to have r_row / diag ?
 
         error = (w_col - q_val) * inv_diag
+        tl.store(e_out_ptrs, error, mask=mask_rows)
 
         # error propogation
         err_broad = error[:, None]
