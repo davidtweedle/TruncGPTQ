@@ -421,10 +421,8 @@ def gptq_block_kernel(
         # diagonal element for scaling
         diag_mask = (offsets_cols == k)
         diag = tl.sum(r_row * diag_mask, axis=0)
-        inv_diag = 1.0 / diag
-        # better to have r_row / diag ?
 
-        error = (w_col - q_val) * inv_diag
+        error = (w_col - q_val) / diag
         tl.store(e_out_ptrs, error, mask=mask_rows)
 
         # error propogation

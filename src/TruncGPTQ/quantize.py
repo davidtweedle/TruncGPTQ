@@ -211,7 +211,7 @@ def main():
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             perm=shared_stats["perm"],
-                            block_size=1024,
+                            block_size=128,
                             use_triton=True,
                             R_x=shared_stats.get("R_x")
                             )
