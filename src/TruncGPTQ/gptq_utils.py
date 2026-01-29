@@ -522,7 +522,7 @@ def triton_process_block(
     q_output = torch.empty_like(w_input)
     e_output = torch.empty_like(w_input)
 
-    BLOCK_ROWS = 32
+    BLOCK_ROWS = 64
     grid = lambda meta: (triton.cdiv(out_features, BLOCK_ROWS),)
 
     # add scales and zeros stride, etc.
