@@ -148,7 +148,7 @@ def evaluate_perplexity(
         real_batch_size = end_idx - j
 
         batch_states = hidden_states[j: end_idx].to(device, non_blocking=True)
-        batch_targets = torch.stack(target_ids_list[j: end_idx]).to(device, non_blocking=True))
+        batch_targets = torch.stack(target_ids_list[j: end_idx]).to(device, non_blocking=True)
 
         batch_states = final_norm(batch_states)
         logits = lm_head(batch_states)
