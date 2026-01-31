@@ -26,7 +26,7 @@ def evaluate_perplexity(
         tokenizer,
         dataset: str = "wikitext2",
         device: str = "cuda",
-        batch_size: int = 32,
+        batch_size: int = 8,
         stride: int = 512
         ) -> float:
     """
@@ -88,6 +88,8 @@ def evaluate_perplexity(
 
     hidden_states, layer_kwargs = model_utils.capture_initial_inputs(model, input_ids_list, device=device, batch_size=batch_size)
     hidden_states = hidden_states.cpu()
+    if not hidden_states.is_pinned():
+        hidden_states = hidden_states.pin_memory()
     layers = model_utils.get_layers(model)
 
     for i, layer in enumerate(layers):
@@ -103,9 +105,9 @@ def evaluate_perplexity(
 
             if real_batch_size < batch_size:
                 input_tensor = torch.zeros((batch_size, seq_len, hidden_dim), dtype=dtype, device=device)
-                input_tensor[:real_batch_size] = hidden_states[j: end_idx].to(device)
+                input_tensor[:real_batch_size] = hidden_states[j: end_idx].to(device, non_blocking=True)
             else:
-                input_tensor = hidden_states[j: end_idx].to(device)
+                input_tensor = hidden_states[j: end_idx].to(device, non_blocking=True)
             batch_kwargs = {
                     k: model_utils.prepare_batch_kwargs(v, device)
                     for k, v in layer_kwargs.items()
@@ -118,7 +120,7 @@ def evaluate_perplexity(
             if real_batch_size < batch_size:
                 out = out[:real_batch_size]
 
-            hidden_states[j: end_idx] = out.cpu()
+            hidden_states[j: end_idx] = out.to("cpu", non_blocking=True)
             del input_tensor, batch_kwargs, out
         layer = layer.cpu()
         cleanup()
@@ -145,8 +147,8 @@ def evaluate_perplexity(
         end_idx = min(j + batch_size, hidden_states.shape[0])
         real_batch_size = end_idx - j
 
-        batch_states = hidden_states[j: end_idx].to(device)
-        batch_targets = torch.stack(target_ids_list[j: end_idx]).to(device)
+        batch_states = hidden_states[j: end_idx].to(device, non_blocking=True)
+        batch_targets = torch.stack(target_ids_list[j: end_idx]).to(device, non_blocking=True))
 
         batch_states = final_norm(batch_states)
         logits = lm_head(batch_states)

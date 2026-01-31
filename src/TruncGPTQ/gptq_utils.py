@@ -480,7 +480,9 @@ def gptq_fwrd(
         orig_dtype = weight_mat.dtype
         weight_mat = weight_mat.to(device=device, dtype=torch.float32)
 
-        H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=torch.float32)
+#        H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=torch.float32)
+        if H_inv_sqrt.dtype != torch.float64:
+            H_inv_sqrt = H_inv_sqrt.to(dtype=torch.float64)
 
         current_rank = H_inv_sqrt.shape[0]
 
@@ -503,7 +505,7 @@ def gptq_fwrd(
             W1 = W[:, i1:i2]
             S1 = S[:, i1:i2]
             Z1 = Z[:, i1:i2]
-            Hinv1 = H_inv_sqrt[i1:i2, i1:i2]
+            Hinv1 = H_inv_sqrt[i1:i2, i1:i2].to(dtype=torch.float32)
             if use_triton:
                 w_block_quantized, E_block = triton_process_block(
                         W1,
@@ -535,8 +537,10 @@ def gptq_fwrd(
             Q_final[:, i1:i2] = w_block_quantized
 
             if i2 < in_features:
-                Global_delta = E_block @ H_inv_sqrt[i1:i2, i2:]
-                W[:, i2:] -= Global_delta
+                E_dbl = E_block.to(dtype=torch.float64)
+                H_slice_dbl = H_inv_sqrt[i1:i2, i2:]
+                Global_delta = torch.matmul(E_dbl, H_slic_dbl)
+                W[:, i2:] -= Global_delta.to(dtype=torch.float32)
 
         if current_rank < in_features:
             W_tail = W[:, current_rank:]
