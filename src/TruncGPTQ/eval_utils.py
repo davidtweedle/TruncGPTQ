@@ -105,9 +105,9 @@ def evaluate_perplexity(
 
             if real_batch_size < batch_size:
                 input_tensor = torch.zeros((batch_size, seq_len, hidden_dim), dtype=dtype, device=device)
-                input_tensor[:real_batch_size] = hidden_states[j: end_idx].to(device, non_blocking=True)
+                input_tensor[:real_batch_size] = hidden_states[j: end_idx].to(device)
             else:
-                input_tensor = hidden_states[j: end_idx].to(device, non_blocking=True)
+                input_tensor = hidden_states[j: end_idx].to(device)
             batch_kwargs = {
                     k: model_utils.prepare_batch_kwargs(v, device)
                     for k, v in layer_kwargs.items()
@@ -120,7 +120,7 @@ def evaluate_perplexity(
             if real_batch_size < batch_size:
                 out = out[:real_batch_size]
 
-            hidden_states[j: end_idx] = out.to("cpu", non_blocking=True)
+            hidden_states[j: end_idx] = out.to("cpu")
             del input_tensor, batch_kwargs, out
         layer = layer.cpu()
         cleanup()
@@ -147,8 +147,8 @@ def evaluate_perplexity(
         end_idx = min(j + batch_size, hidden_states.shape[0])
         real_batch_size = end_idx - j
 
-        batch_states = hidden_states[j: end_idx].to(dtype=torch.float32, device=device, non_blocking=True)
-        batch_targets = torch.cat(target_ids_list[j: end_idx], dim=0).to(device, non_blocking=True)
+        batch_states = hidden_states[j: end_idx].to(device=device)
+        batch_targets = torch.cat(target_ids_list[j: end_idx], dim=0).to(device)
 
         batch_states = final_norm(batch_states)
         logits = lm_head(batch_states)
@@ -158,8 +158,8 @@ def evaluate_perplexity(
         loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)).float(), shift_labels.view(-1))
 
         num_active_tokens = (shift_labels != -100).sum().item()
-        logging.info(f"Num active tokens: {num_actives_tokens}")
         current_loss = loss.item()
+        logging.info(f"Num active tokens: {num_actives_tokens}, loss: {current_loss}")
         if torch.isnan(loss):
             logger.warning(f"Found Nan loss at batch {j}. Active tokens: {num_active_tokens}")
             current_loss = 0.0
