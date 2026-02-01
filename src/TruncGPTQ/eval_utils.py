@@ -88,8 +88,8 @@ def evaluate_perplexity(
 
     hidden_states, layer_kwargs = model_utils.capture_initial_inputs(model, input_ids_list, device=device, batch_size=batch_size)
     hidden_states = hidden_states.cpu()
-    if not hidden_states.is_pinned():
-        hidden_states = hidden_states.pin_memory()
+#    if not hidden_states.is_pinned():
+#        hidden_states = hidden_states.pin_memory()
     layers = model_utils.get_layers(model)
 
     for i, layer in enumerate(layers):
@@ -152,7 +152,6 @@ def evaluate_perplexity(
 
         batch_states = final_norm(batch_states)
         logits = lm_head(batch_states)
-        logging.info(f"logit shape: {logits.shape}, labels_shape: {batch_targets.shape}")
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = batch_targets[..., 1:].contiguous()
 
