@@ -166,6 +166,8 @@ def evaluate_perplexity(
 
         if total_tokens > 0:
             pbar.set_postfix({"ppl": f"{torch.exp(torch.tensor(total_nll / total_tokens)):.2f}"})
+        if j % 100 == 0:
+            logging.INFO(f" PPL: {torch.exp(torch.tensor(total_nll / total_tokens)):.2f}")
 
     final_norm = final_norm.cpu()
     lm_head = lm_head.cpu()
