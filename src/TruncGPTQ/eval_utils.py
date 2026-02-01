@@ -155,21 +155,25 @@ def evaluate_perplexity(
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = batch_targets[..., 1:].contiguous()
 
-        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)).float(), shift_labels.view(-1))
 
         num_active_tokens = (shift_labels != -100).sum().item()
+        current_loss = loss.item()
+        if torch.isnan(loss):
+            logger.warning(f"Found Nan loss at batch {j}. Active tokens: {num_active_tokens}")
+            current_loss = 0.0
         if num_active_tokens > 0:
-            total_nll += loss.float().item() * num_active_tokens
+            total_nll += current_loss * num_active_tokens
             total_tokens += num_active_tokens
 
         del batch_states, batch_targets, logits
 
         if total_tokens > 0:
             pbar.set_postfix({"ppl": f"{torch.exp(torch.tensor(total_nll / total_tokens)):.2f}"})
-        if j % 100 == 0:
-            logging.info(f" PPL: {torch.exp(torch.tensor(total_nll / total_tokens)):.2f}")
 
     final_norm = final_norm.cpu()
     lm_head = lm_head.cpu()
     cleanup()
+    if total_tokens == 0:
+        return float("nan")
     return torch.exp(torch.tensor(total_nll / total_tokens)).item()
