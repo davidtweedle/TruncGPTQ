@@ -159,7 +159,7 @@ def evaluate_perplexity(
 
         num_active_tokens = (shift_labels != -100).sum().item()
         current_loss = loss.item()
-        logging.info(f"Num active tokens: {num_actives_tokens}, loss: {current_loss}")
+        logging.info(f"Num active tokens: {num_active_tokens}, loss: {current_loss}")
         if torch.isnan(loss):
             logger.warning(f"Found Nan loss at batch {j}. Active tokens: {num_active_tokens}")
             current_loss = 0.0
