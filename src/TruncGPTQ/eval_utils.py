@@ -152,6 +152,7 @@ def evaluate_perplexity(
 
         batch_states = final_norm(batch_states)
         logits = lm_head(batch_states)
+        logging.info(f"logit shape: {logits.shape}, labels_shape: {batch_targets.shape}")
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = batch_targets[..., 1:].contiguous()
 
