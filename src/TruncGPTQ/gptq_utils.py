@@ -412,7 +412,7 @@ def triton_process_block(
         w_input = torch.nn.functional.pad(w_block, (0, pad_cols), mode='constant', value=0.0)
         s_input = torch.nn.functional.pad(s_block, (0, pad_cols), mode='constant', value=1.0)
         z_input = torch.nn.functional.pad(z_block, (0, pad_cols), mode='constant', value=0.0)
-        R_input = torch.nn.functional.pad(R_block, (0, pad_cols, 0, pad_cols), mode='constant', value=1.0)
+        R_input = torch.nn.functional.pad(R_block, (0, pad_cols, 0, pad_cols), mode='constant', value=0.0)
     else:
         w_input = w_block
         s_input = s_block
