@@ -147,7 +147,7 @@ def evaluate_perplexity(
         end_idx = min(j + batch_size, hidden_states.shape[0])
         real_batch_size = end_idx - j
 
-        batch_states = hidden_states[j: end_idx].to(device, non_blocking=True)
+        batch_states = hidden_states[j: end_idx].to(dtype=torch.float32, device=device, non_blocking=True)
         batch_targets = torch.cat(target_ids_list[j: end_idx], dim=0).to(device, non_blocking=True)
 
         batch_states = final_norm(batch_states)
@@ -158,6 +158,7 @@ def evaluate_perplexity(
         loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)).float(), shift_labels.view(-1))
 
         num_active_tokens = (shift_labels != -100).sum().item()
+        logging.info(f"Num active tokens: {num_actives_tokens}")
         current_loss = loss.item()
         if torch.isnan(loss):
             logger.warning(f"Found Nan loss at batch {j}. Active tokens: {num_active_tokens}")
