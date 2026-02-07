@@ -486,7 +486,7 @@ def gptq_fwrd_fp64_ref(
         Q_final[:, i] = q_dequant
         err = (w - q_dequant) / d
         delta = err.unsqueeze(1).matmul(H_inv_sqrt[i, i:].unsqueeze(0))
-        W1[:, i:] -= delta
+        W[:, i:] -= delta
     if current_rank < in_features:
         W_tail = W[:, current_rank:]
         S_tail = S[:, current_rank:]
@@ -533,7 +533,7 @@ def gptq_fwrd(
 #        H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=torch.float32)
         if H_inv_sqrt.dtype != torch.float64:
             H_inv_sqrt = H_inv_sqrt.to(dtype=torch.float64)
-2
+
         current_rank = H_inv_sqrt.shape[0]
 
         if current_rank < in_features:
