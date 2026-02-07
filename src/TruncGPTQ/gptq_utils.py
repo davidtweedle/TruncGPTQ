@@ -484,8 +484,8 @@ def gptq_fwrd_fp64_ref(
         q = torch.round(w / s + z).clamp(quantizer.min_q, quantizer.max_q)
         q_dequant = (q - z) * s
         Q_final[:, i] = q_dequant
-        err = (w - q_dequant) / d
-        delta = err.unsqueeze(1).matmul(H_inv_sqrt[i, i:].unsqueeze(0))
+        err = w - q_dequant 
+        delta = err.unsqueeze(1).matmul(H_inv_sqrt[i, i:].unsqueeze(0)) / d
         W[:, i:] -= delta
     if current_rank < in_features:
         W_tail = W[:, current_rank:]
