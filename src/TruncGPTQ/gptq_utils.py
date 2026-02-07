@@ -455,6 +455,56 @@ def triton_process_block(
 # ==============================================================================
 # GPTQ Updates
 # ==============================================================================
+def gptq_fwrd_fp64_ref(
+        weight_mat: torch.Tensor,
+        H_inv_sqrt: torch.Tensor,
+        quantizer: Quantizer,
+        perm: torch.Tensor,
+        R_x: Optional[torch.Tensor] = None
+        ) -> Tuple[torch.Tensor, int]:
+    out_features, in_features = weight_mat.shape
+    device = weight_mat.device
+    orig_dtype = weight_mat.dtype
+    W = weight_mat.clone().to(torch.float64)
+    current_rank = H_inv_sqrt.shape[0]
+    quantizer.find_params(weight_mat)
+    S_full, Z_full = quantizer.get_expanded_params(out_features, in_features)
+    W = W[:, perm]
+    S = S_full[:, perm].to(device=device, dtype=torch.float64).clone()
+    Z = Z_full[:, perm].to(device=device, dtype=torch.float64).clone()
+    del S_full, Z_full
+
+    Q_final = torch.zeros_like(W)
+    for i in range(0, current_rank):
+        w = W[:, i]
+        d = H_inv_sqrt[i, i]
+        s = S[:, i]
+        z = Z[:, i]
+
+        q = torch.round(w / s + z).clamp(quantizer.min_q, quantizer.max_q)
+        q_dequant = (q - z) * s
+        Q_final[:, i] = q_dequant
+        err = (w - q_dequant) / d
+        delta = err.unsqueeze(1).matmul(H_inv_sqrt[i, i:].unsqueeze(0))
+        W1[:, i:] -= delta
+    if current_rank < in_features:
+        W_tail = W[:, current_rank:]
+        S_tail = S[:, current_rank:]
+        Z_tail = Z[:, current_rank:]
+
+        q_tail = torch.round(W_tail / S_tail + Z_tail).clamp(quantizer.min_q, quantizer.max_q)
+        Q_final[:, current_rank:] = (q_tail - Z_tail) * S_tail
+
+    # restore original column order
+    inv_perm = torch.argsort(perm)
+    final_W = Q_final[:, inv_perm]
+    torch.cuda.synchronize()
+
+    if R_x is not None:
+        log_quantization_error(weight_mat, final_W, R_x, perm)
+
+    return final_W.to(dtype=orig_dtype), current_rank
+
 
 def gptq_fwrd(
         weight_mat: torch.Tensor,
@@ -483,7 +533,7 @@ def gptq_fwrd(
 #        H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=torch.float32)
         if H_inv_sqrt.dtype != torch.float64:
             H_inv_sqrt = H_inv_sqrt.to(dtype=torch.float64)
-
+2
         current_rank = H_inv_sqrt.shape[0]
 
         if current_rank < in_features:
