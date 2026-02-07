@@ -285,9 +285,9 @@ def log_quantization_error(
         return
     w_dtype = W_orig.dtype
     r_device = W_orig.device
-    R_mat = R_x.to(device=r_device, dtype=torch.float32)
-    W_o = W_orig[:, perm]
-    W_q = W_quant[:, perm]
+    R_mat = R_x.to(device=r_device, dtype=torch.float64)
+    W_o = W_orig[:, perm].to(torch.float64)
+    W_q = W_quant[:, perm].to(torch.float64)
     y_orig_norm = torch.linalg.norm(torch.matmul(W_o, R_mat.T))
     y_diff_norm = torch.linalg.norm(torch.matmul(W_o - W_q, R_mat.T))
     relative_error = (y_diff_norm / y_orig_norm).item()
