@@ -487,6 +487,9 @@ def gptq_fwrd_fp64_ref(
         err = w - q_dequant 
         d_inv = 1.0 / d
         corr = H_inv_sqrt[i, i + 1:] * d_inv
+        corr = corr.to(torch.float32)
+        subn = 1.17549435e-38
+        corr[torch.abs(corr) < subn] = 0.0
         torch.addcmul(
                 W[:, i + 1:],
                 err.unsqueeze(1),
