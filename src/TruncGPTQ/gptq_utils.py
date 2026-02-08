@@ -465,13 +465,13 @@ def gptq_fwrd_fp64_ref(
     out_features, in_features = weight_mat.shape
     device = weight_mat.device
     orig_dtype = weight_mat.dtype
-    W = weight_mat.clone().to(torch.float16)
+    W = weight_mat.clone()
     current_rank = H_inv_sqrt.shape[0]
     quantizer.find_params(weight_mat)
     S_full, Z_full = quantizer.get_expanded_params(out_features, in_features)
-    W = W[:, perm].to(torch.float64)
-    S = S_full[:, perm].to(device=device, dtype=torch.float64).clone()
-    Z = Z_full[:, perm].to(device=device, dtype=torch.float64).clone()
+    W = W[:, perm]
+    S = S_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float32).clone()
+    Z = Z_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float32).clone()
     del S_full, Z_full
 
     Q_final = torch.zeros_like(W)
@@ -487,9 +487,11 @@ def gptq_fwrd_fp64_ref(
         err = w - q_dequant 
         d_inv = 1.0 / d
         corr = H_inv_sqrt[i, i + 1:] * d_inv
+        err = err.to(torch.float32)
         corr = corr.to(torch.float32)
         subn = 1.17549435e-38
         corr[torch.abs(corr) < subn] = 0.0
+        err[torch.abs(err) < subn] = 0.0
         torch.addcmul(
                 W[:, i + 1:],
                 err.unsqueeze(1),
@@ -497,6 +499,7 @@ def gptq_fwrd_fp64_ref(
                 value=-1.0,
                 out=W[:, i+1:]
                 )
+        W[torch.abs(W) < subn] = 0.0
     if current_rank < in_features:
         W_tail = W[:, current_rank:]
         S_tail = S[:, current_rank:]
