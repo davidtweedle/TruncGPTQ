@@ -114,6 +114,14 @@ def get_args():
             "--adaptive_eps", action="store_true",
             help="Scale epsilon down by 10x for senstive layers (down_proj, o_proj)."
             )
+    quant_group.add_argument(
+            "--beta", type=float, default=1.0,
+            help="Damp scaling factors before quantization. For w_bits == 3, put beta = 0.95, for w_bits == 2 put beta = 0.8."
+            )
+    quant_group.add_argument(
+            "--rotate_weights", action="store_true",
+            help="Rotate weights by random Hadamard matrix before quantization."
+            )
 
     # --- Output Configuration ---
     out_group = parser.add_argument_group("Output Configuration")
