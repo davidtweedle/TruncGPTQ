@@ -87,7 +87,8 @@ def process_sketch(
 def process_hessian_alt(
         H: torch.Tensor,
         threshold: float = 0.0005,
-        threshold_method: str = "mean_trimmed"
+        threshold_method: str = "mean_trimmed",
+        had_mat: Optional[torch.Tensor] = None
         ) -> Tuple[torch.Tensor, torch.Tensor]:
     H_double = H.to(dtype=torch.float64)
     L, V = torch.linalg.eigh(H_double)
@@ -212,14 +213,17 @@ class Sketcher:
         return self.Y
 
 class HessianAccumulator:
-    def __init__(self, in_features, device, dtype=torch.float64):
+    def __init__(self, in_features, device, dtype=torch.float64, had_mat=None):
         self.H = torch.zeros((in_features, in_features), device=device, dtype=dtype)
         self.n_samples = 0
+        if had_mat is None:
+            had_mat = torch.eye(in_features, dtype=torch.float64)
+        self.had_mat = had_mat
 
     def add_batch(self, x):
         if x.dim() == 3:
             x = x.reshape(-1, x.shape[-1])
-        x = x.to(self.H.dtype)
+        x = x.to(self.H.dtype) @ self.had_mat.T
         self.H.addmm_(x.T, x)
         self.n_samples += x.shape[0]
 
@@ -469,9 +473,9 @@ def gptq_fwrd_fp64_ref(
     current_rank = H_inv_sqrt.shape[0]
     quantizer.find_params(weight_mat)
     S_full, Z_full = quantizer.get_expanded_params(out_features, in_features)
-    W = W[:, perm]
-    S = S_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float32).clone()
-    Z = Z_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float32).clone()
+    W = W[:, perm].to(torch.float64)
+    S = S_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float64).clone()
+    Z = Z_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float64).clone()
     del S_full, Z_full
 
     Q_final = torch.zeros_like(W)
@@ -485,21 +489,21 @@ def gptq_fwrd_fp64_ref(
         q_dequant = (q - z) * s
         Q_final[:, i] = q_dequant
         err = w - q_dequant 
-        d_inv = 1.0 / d
-        corr = H_inv_sqrt[i, i + 1:] * d_inv
-        err = err.to(torch.float32)
-        corr = corr.to(torch.float32)
+        d_inv = -1.0 / d
+        corr = H_inv_sqrt[i, i + 1:]
+        #err = err.to(torch.float32)
+        #corr = corr.to(torch.float32)
         subn = 1.17549435e-38
-        corr[torch.abs(corr) < subn] = 0.0
-        err[torch.abs(err) < subn] = 0.0
+        #corr[torch.abs(corr) < subn] = 0.0
+        #err[torch.abs(err) < subn] = 0.0
         torch.addcmul(
                 W[:, i + 1:],
                 err.unsqueeze(1),
                 corr.unsqueeze(0),
-                value=-1.0,
+                value=d_inv,
                 out=W[:, i+1:]
                 )
-        W[torch.abs(W) < subn] = 0.0
+        #W[torch.abs(W) < subn] = 0.0
     if current_rank < in_features:
         W_tail = W[:, current_rank:]
         S_tail = S[:, current_rank:]
