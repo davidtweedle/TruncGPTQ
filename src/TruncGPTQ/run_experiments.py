@@ -15,8 +15,13 @@ TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 BASE_SAVE_DIR = Path(f"tuning_results_{TIMESTAMP}")
 experiments = []
 
-for bits in [4, 3]:
-    for eps in [1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
+for bits in [4, 3, 2]:
+    for eps in [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
+        beta = 1.0
+        if bits == 3:
+            beta = 0.95
+        elif bits == 2:
+            beta = 0.8
         experiments.append({
             "name": f"Trunc_W{bits}_Sym_{eps}",
             "mode": "eigh",
@@ -26,11 +31,18 @@ for bits in [4, 3]:
             "algo": "TruncGPTQ",
             "adaptive_eps": False,
             "eps": eps,
-            "batch_size": 32
+            "batch_size": 32,
+            "beta": beta,
+            "rotate_weights": False,
             })
 
 for bits in [4, 3, 2]:
-    for eps in [1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
+    for eps in [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
+        beta = 1.0
+        if bits == 3:
+            beta = 0.95
+        elif bits == 2:
+            beta = 0.8
         experiments.append({
             "name": f"Trunc_W{bits}_Asym_{eps}",
             "mode": "eigh",
@@ -40,7 +52,9 @@ for bits in [4, 3, 2]:
             "algo": "TruncGPTQ",
             "adaptive_eps": False,
             "eps": eps,
-            "batch_size": 32
+            "batch_size": 32,
+            "beta": beta,
+            "rotate_weights": False
             })
 
 
@@ -84,7 +98,8 @@ def main():
                 "--batch_size", str(exp['batch_size']),
                 "--threshold_method", "energy",
                 "--sketch_ratio", "1.0",
-                "--no_save"
+                "--no_save",
+                "--beta", str(exp['beta'])
                 ]
         if exp["mode"] == "baseline":
             cmd.extend(["--mode", "baseline"])
@@ -99,6 +114,8 @@ def main():
                     cmd.append("--adaptive_eps")
             if exp.get("sym", False):
                 cmd.append("--sym")
+            if exp.get("rotate_weights", False):
+                cmd.append("--rotate_weights")
         start_t = datetime.now()
         success = run_command(cmd)
         duration = (datetime.now() - start_t).total_seconds()

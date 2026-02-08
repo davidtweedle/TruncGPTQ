@@ -6,11 +6,13 @@ import logging
 import torch
 import jax
 from tqdm import tqdm
+import math
 
 from utils import get_args, setup_logging
 import data_utils
 import model_utils
 import eval_utils
+import had_utils
 from gptq_utils import gptq_fwrd, gptq_fwrd_fp64_ref, Quantizer, Sketcher, process_sketch, process_hessian, process_hessian_alt, HessianAccumulator
 from model_utils import prepare_batch_kwargs
 
@@ -117,12 +119,18 @@ def main():
             submodule = get_submodule(layer, name)
             out_features, in_features = submodule.weight.shape
             capture_start = time.time()
+            had_mat = None
+            if args.rotate_weights:
+                had_mat_arr = had_utils.had_order_n(in_features)
+                had_mat = torch.tensor(had_mat_arr, dtype=torch.float64, device=args.device) * (in_features ** -0.5)
+                signs = torch.randint(0, 2, (in_features,), device=had_mat.device) * 2 - 1
+                had_mat = signs[:, None] * had_mat
             if args.mode == "svd":
                 rank = int(in_features * args.sketch_ratio)
-                accumulator = Sketcher(submodule, rank, device=args.device)
+                accumulator = Sketcher(submodule, rank, device=args.device, had_mat=had_mat)
                 handles.append(submodule.register_forward_hook(accumulator.hook_fn))
             elif args.mode == "gptq" or args.mode == "eigh":
-                accumulator = HessianAccumulator(in_features, device=args.device)
+                accumulator = HessianAccumulator(in_features, device=args.device, had_mat=had_mat)
                 def h_hook(module, inp, out):
                     accumulator.add_batch(inp[0].detach())
                 handles.append(submodule.register_forward_hook(h_hook))
@@ -151,6 +159,7 @@ def main():
             proc_start = time.time()
             if args.mode == 'svd':
                 Y_sketch = accumulator.get_scaled_sketch()
+                had_mat = accumulator.had_mat
                 del accumulator
                 logging.info(f"   Processing Sketch (Shape: {Y_sketch.shape})")
                 process_start = time.time()
@@ -162,25 +171,27 @@ def main():
                 logging.info(f"   Sketch processed in {time.time() - process_start}")
                 del Y_sketch
                 cleanup()
-                shared_stats = {"R": R, "perm": perm}
+                shared_stats = {"R": R, "perm": perm, "had_mat": had_mat}
             elif args.mode == 'gptq':
                 H_matrix = accumulator.get_hessian()
+                had_mat = accumulator.had_mat
                 del accumulator
                 R, perm = process_hessian(
                         H=H_matrix,
                         actorder=args.actorder,
                         damp_percent=args.damp_percent
                         )
-                shared_stats = {"R": R, "perm": perm}
+                shared_stats = {"R": R, "perm": perm, "had_mat": had_mat}
             elif args.mode == 'eigh':
                 H_matrix = accumulator.get_hessian()
+                had_mat = accumulator.had_mat
                 del accumulator
                 R, R_x, perm = process_hessian_alt(
                         H=H_matrix,
                         threshold=current_eps,
                         threshold_method=args.threshold_method
                         )
-                shared_stats = {"R": R, "R_x": R_x, "perm": perm}
+                shared_stats = {"R": R, "R_x": R_x, "perm": perm, "had_mat": had_mat}
             elif args.mode == 'test':
                 H_matrix = accumulator_hessian.get_hessian()
                 Y_sketch = accumulator_sketch.get_scaled_sketch()
@@ -201,13 +212,14 @@ def main():
                 W = submodule.weight.data.float()
                 m, n = W.shape
 
-                quantizer = Quantizer(w_bits=args.w_bits, group_size=args.group_size, sym=args.sym)
+                quantizer = Quantizer(w_bits=args.w_bits, group_size=args.group_size, sym=args.sym, beta=args.beta)
                 solve_start = time.time()
 
                 used_rank = "N/A"
                 if args.mode in {"svd", "eigh"}:
+                    had_mat = shared_stats["had_mat"]
                     final_W, used_rank = gptq_fwrd_fp64_ref(
-                            weight_mat=W,
+                            weight_mat=W @ had_mat,
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             perm=shared_stats["perm"],
@@ -215,15 +227,18 @@ def main():
                             #use_triton=True,
                             R_x=shared_stats.get("R_x")
                             )
+                    final_W = final_W @ had_mat.T
                 elif args.mode == "gptq":
+                    had_mat = shared_stats["had_mat"]
                     final_W, _ = gptq_fwrd_fp64_ref(
-                            weight_mat=W,
+                            weight_mat=W @ had_mat,
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             #block_size=1024,
                             #use_triton=False,
                             perm=shared_stats["perm"]
                             )
+                    final_W = final_W @ had_mat.T
                 elif args.mode == "test":
                     final_W = W
                 submodule.weight.copy_(final_W)
