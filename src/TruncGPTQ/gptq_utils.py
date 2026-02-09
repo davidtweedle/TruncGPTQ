@@ -459,63 +459,89 @@ def triton_process_block(
 # ==============================================================================
 # GPTQ Updates
 # ==============================================================================
-def gptq_fwrd_fp64_ref(
+
+@torch.compile(mode="max-autotune", fullgraph=True, dynamic=True)
+def update_block(W_slice, diag, corr, Err):
+    inv_diag = 1.0 / diag
+    scale_corr = corr * inv_diag.unsqueeze(1)
+    update = Err @ scale_corr
+    W_slice -= update
+
+
+def gptq_fwrd_fp32_ref(
         weight_mat: torch.Tensor,
         H_inv_sqrt: torch.Tensor,
         quantizer: Quantizer,
         perm: torch.Tensor,
+        block_size: int = 128,
         R_x: Optional[torch.Tensor] = None
         ) -> Tuple[torch.Tensor, int]:
-    out_features, in_features = weight_mat.shape
-    device = weight_mat.device
-    orig_dtype = weight_mat.dtype
-    W = weight_mat.clone()
-    current_rank = H_inv_sqrt.shape[0]
-    quantizer.find_params(weight_mat)
-    S_full, Z_full = quantizer.get_expanded_params(out_features, in_features)
-    W = W[:, perm].to(torch.float64)
-    S = S_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float64).clone()
-    Z = Z_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float64).clone()
-    del S_full, Z_full
+    allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = False
 
+    try:
+        out_features, in_features = weight_mat.shape
+        device = weight_mat.device
+        H_inv_sqrt = H_inv_sqrt.to(torch.float32)
+        orig_dtype = weight_mat.dtype
+        W = weight_mat.clone()
+        current_rank = H_inv_sqrt.shape[0]
+        quantizer.find_params(weight_mat)
+        S_full, Z_full = quantizer.get_expanded_params(out_features, in_features)
+        W = W[:, perm].to(torch.float32)
+        S = S_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float32).clone()
+        Z = Z_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float32).clone()
+        del S_full, Z_full
 
-    for i in range(0, current_rank):
-        w = W[:, i].clone()
-        d = H_inv_sqrt[i, i]
-        s = S[:, i]
-        z = Z[:, i]
+        for i in range(0, current_rank, block_size):
+            end = min(current_rank, i + block_size)
+            Err = torch.zeros_like(W[:, i: end])
+            Hinv1 = H_inv_sqrt[i: end, i: end]
+            for j in range(i, end):
+                w = W[:, j].clone()
+                d = Hinv1[j - i, j - i]
+                s = S[:, j]
+                z = Z[:, j]
 
-        q = torch.round(w / s + z).clamp(quantizer.min_q, quantizer.max_q)
-        q_dequant = (q - z) * s
-        W[:, i] = q_dequant
-        err = w - q_dequant 
-        neg_d_inv = -1.0 / d
-        corr = H_inv_sqrt[i, i + 1:]
-        torch.addcmul(
-                W[:, i + 1:],
-                err.unsqueeze(1),
-                corr.unsqueeze(0),
-                value=neg_d_inv,
-                out=W[:, i+1:]
-                )
-        #W[torch.abs(W) < subn] = 0.0
-    if current_rank < in_features:
-        W_tail = W[:, current_rank:]
-        S_tail = S[:, current_rank:]
-        Z_tail = Z[:, current_rank:]
+                q = torch.round(w / s + z).clamp(quantizer.min_q, quantizer.max_q)
+                q_dequant = (q - z) * s
+                W[:, j] = q_dequant
+                err = w - q_dequant
+                Err[:, j - i] = err
+                neg_d_inv = -1.0 / d
+                corr = Hinv1[j - i, j - i + 1:]
+                torch.addcmul(
+                        W[:, j + 1:end],
+                        err.unsqueeze(1),
+                        corr.unsqueeze(0),
+                        value=neg_d_inv,
+                        out=W[:, j+1:end]
+                        )
+            if end < current_rank:
+                update_block(W[:, end:],
+                             torch.diagonal(Hinv1),
+                             H_inv_sqrt[i: end, end:],
+                             Err
+                             )
+        if current_rank < in_features:
+            W_tail = W[:, current_rank:]
+            S_tail = S[:, current_rank:]
+            Z_tail = Z[:, current_rank:]
 
-        q_tail = torch.round(W_tail / S_tail + Z_tail).clamp(quantizer.min_q, quantizer.max_q)
-        W[:, current_rank:] = (q_tail - Z_tail) * S_tail
+            q_tail = torch.round(W_tail / S_tail + Z_tail).clamp(quantizer.min_q, quantizer.max_q)
+            W[:, current_rank:] = (q_tail - Z_tail) * S_tail
 
-    # restore original column order
-    inv_perm = torch.argsort(perm)
-    final_W = W[:, inv_perm]
-    torch.cuda.synchronize()
+        # restore original column order
+        inv_perm = torch.argsort(perm)
+        final_W = W[:, inv_perm]
+        torch.cuda.synchronize()
 
-    if R_x is not None:
-        log_quantization_error(weight_mat, final_W, R_x, perm)
+        if R_x is not None:
+            log_quantization_error(weight_mat, final_W, R_x, perm)
 
-    return final_W.to(dtype=orig_dtype), current_rank
+        return final_W.to(dtype=orig_dtype), current_rank
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = allow_tf32
 
 
 def gptq_fwrd(
@@ -542,9 +568,7 @@ def gptq_fwrd(
         orig_dtype = weight_mat.dtype
         weight_mat = weight_mat.to(device=device, dtype=torch.float32)
 
-#        H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=torch.float32)
-        if H_inv_sqrt.dtype != torch.float64:
-            H_inv_sqrt = H_inv_sqrt.to(dtype=torch.float64)
+        H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=torch.float32)
 
         current_rank = H_inv_sqrt.shape[0]
 
@@ -555,7 +579,7 @@ def gptq_fwrd(
         quantizer.find_params(weight_mat)
         S_full, Z_full = quantizer.get_expanded_params(out_features, in_features)
         W = weight_mat[:, perm].clone()
-        S = S_full[:, perm].to(device=device, dtype=torch.float32).clone()
+        S = S_full[:, perm].to(torch.float16).to(device=device, dtype=torch.float32).clone()
         Z = Z_full[:, perm].to(device=device, dtype=torch.float32).clone()
 
         Q_final = torch.zeros_like(W)
@@ -567,7 +591,7 @@ def gptq_fwrd(
             W1 = W[:, i1:i2]
             S1 = S[:, i1:i2]
             Z1 = Z[:, i1:i2]
-            Hinv1 = H_inv_sqrt[i1:i2, i1:i2].to(dtype=torch.float32)
+            Hinv1 = H_inv_sqrt[i1:i2, i1:i2]
             if use_triton:
                 w_block_quantized, E_block = triton_process_block(
                         W1,
@@ -580,7 +604,7 @@ def gptq_fwrd(
             else:
                 Q1 = torch.zeros_like(W1)
                 Err1 = torch.zeros_like(W1)
-
+                
                 for i in range(count):
                     w = W1[:, i]
                     d = Hinv1[i, i]
@@ -599,10 +623,19 @@ def gptq_fwrd(
             Q_final[:, i1:i2] = w_block_quantized
 
             if i2 < in_features:
-                E_dbl = E_block.to(dtype=torch.float64)
-                H_slice_dbl = H_inv_sqrt[i1:i2, i2:]
-                Global_delta = torch.matmul(E_dbl, H_slice_dbl)
-                W[:, i2:] -= Global_delta.to(dtype=torch.float32)
+                if use_triton:
+                    H_inv_sqrt_cross = H_inv_sqrt[i1:i2, i2:]
+                    diag_vals = torch.diagonal(Hinv1)
+                    update_block(
+                            W[:, i2:],
+                            diag_vals,
+                            H_inv_sqrt_cross,
+                            E_block
+                            )
+
+                else:
+                    Global_delta = E_block.matmul(H_inv_sqrt[i1:i2, i2:])
+                    W[:, i2:] -= Global_delta
 
         if current_rank < in_features:
             W_tail = W[:, current_rank:]

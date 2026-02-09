@@ -13,7 +13,7 @@ import data_utils
 import model_utils
 import eval_utils
 import had_utils
-from gptq_utils import gptq_fwrd, gptq_fwrd_fp64_ref, Quantizer, Sketcher, process_sketch, process_hessian, process_hessian_alt, HessianAccumulator
+from gptq_utils import gptq_fwrd, gptq_fwrd_fp32_ref, Quantizer, Sketcher, process_sketch, process_hessian, process_hessian_alt, HessianAccumulator
 from model_utils import prepare_batch_kwargs
 
 def get_adaptive_eps(layer_name, base_eps):
@@ -218,23 +218,23 @@ def main():
                 used_rank = "N/A"
                 if args.mode in {"svd", "eigh"}:
                     had_mat = shared_stats["had_mat"]
-                    final_W, used_rank = gptq_fwrd_fp64_ref(
+                    final_W, used_rank = gptq_fwrd_fp32_ref(
                             weight_mat=W.to(torch.float64) @ had_mat,
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             perm=shared_stats["perm"],
-                            #block_size=128,
+                            block_size=128,
                             #use_triton=True,
                             R_x=shared_stats.get("R_x")
                             )
                     final_W = final_W @ had_mat.T
                 elif args.mode == "gptq":
                     had_mat = shared_stats["had_mat"]
-                    final_W, _ = gptq_fwrd_fp64_ref(
+                    final_W, _ = gptq_fwrd_fp32_ref(
                             weight_mat=W.to(torch.float64) @ had_mat,
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
-                            #block_size=1024,
+                            block_size=1024,
                             #use_triton=False,
                             perm=shared_stats["perm"]
                             )
