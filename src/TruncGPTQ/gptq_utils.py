@@ -477,19 +477,20 @@ def gptq_fwrd_fp64_ref(
     S = S_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float64).clone()
     Z = Z_full[:, perm].to(device=device, dtype=torch.float16).to(torch.float64).clone()
     del S_full, Z_full
+    update_buffer = torch.zeros_like(W)
 
-    Q_final = torch.zeros_like(W)
+
     for i in range(0, current_rank):
-        w = W[:, i]
+        w = W[:, i] - update_buffer[:, i]
         d = H_inv_sqrt[i, i]
         s = S[:, i]
         z = Z[:, i]
 
         q = torch.round(w / s + z).clamp(quantizer.min_q, quantizer.max_q)
         q_dequant = (q - z) * s
-        Q_final[:, i] = q_dequant
+        W[:, i] = q_dequant
         err = w - q_dequant 
-        d_inv = -1.0 / d
+        d_inv = 1.0 / d
         corr = H_inv_sqrt[i, i + 1:]
         #err = err.to(torch.float32)
         #corr = corr.to(torch.float32)
@@ -497,24 +498,24 @@ def gptq_fwrd_fp64_ref(
         #corr[torch.abs(corr) < subn] = 0.0
         #err[torch.abs(err) < subn] = 0.0
         torch.addcmul(
-                W[:, i + 1:],
+                update_buffer[:, i + 1:],
                 err.unsqueeze(1),
                 corr.unsqueeze(0),
                 value=d_inv,
-                out=W[:, i+1:]
+                out=update_buffer[:, i+1:]
                 )
         #W[torch.abs(W) < subn] = 0.0
     if current_rank < in_features:
-        W_tail = W[:, current_rank:]
+        W_tail = W[:, current_rank:] - update_buffer[:, current_rank:]
         S_tail = S[:, current_rank:]
         Z_tail = Z[:, current_rank:]
 
         q_tail = torch.round(W_tail / S_tail + Z_tail).clamp(quantizer.min_q, quantizer.max_q)
-        Q_final[:, current_rank:] = (q_tail - Z_tail) * S_tail
+        W[:, current_rank:] = (q_tail - Z_tail) * S_tail
 
     # restore original column order
     inv_perm = torch.argsort(perm)
-    final_W = Q_final[:, inv_perm]
+    final_W = W[:, inv_perm]
     torch.cuda.synchronize()
 
     if R_x is not None:
