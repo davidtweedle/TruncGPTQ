@@ -460,12 +460,12 @@ def triton_process_block(
 # GPTQ Updates
 # ==============================================================================
 
-@torch.compile(mode="max-autotune", fullgraph=True, dynamic=True)
+@torch.compile(mode="default", fullgraph=True, dynamic=True)
 def update_block(W_slice, diag, corr, Err):
     inv_diag = 1.0 / diag
     scale_corr = corr * inv_diag.unsqueeze(1)
     update = Err @ scale_corr
-    W_slice -= update
+    return W_slice - update
 
 
 def gptq_fwrd_fp32_ref(
@@ -518,11 +518,12 @@ def gptq_fwrd_fp32_ref(
                         out=W[:, j+1:end]
                         )
             if end < current_rank:
-                update_block(W[:, end:],
-                             torch.diagonal(Hinv1),
-                             H_inv_sqrt[i: end, end:],
-                             Err
-                             )
+                W[:, end] = update_block(
+                        W[:, end:],
+                        torch.diagonal(Hinv1),
+                        H_inv_sqrt[i: end, end:],
+                        Err
+                        )
         if current_rank < in_features:
             W_tail = W[:, current_rank:]
             S_tail = S[:, current_rank:]
