@@ -486,22 +486,22 @@ def gptq_fwrd_fp64_ref(
         s = S[:, i]
         z = Z[:, i]
 
-        q = torch.round(w / s + z).clamp(quantizer.min_q, quantizer.max_q)
+        q = torch.floor(w / s + z + 0.5).clamp(quantizer.min_q, quantizer.max_q)
         q_dequant = (q - z) * s
         W[:, i] = q_dequant
         err = w - q_dequant 
         d_inv = 1.0 / d
-        corr = H_inv_sqrt[i, i + 1:]
-        #err = err.to(torch.float32)
-        #corr = corr.to(torch.float32)
+        corr = H_inv_sqrt[i, i + 1:] * d
+        #  err = err.to(torch.float32)
+        corr = corr.to(torch.float32)
         subn = 1.17549435e-38
-        #corr[torch.abs(corr) < subn] = 0.0
-        #err[torch.abs(err) < subn] = 0.0
+        corr[torch.abs(corr) < subn] = 0.0
+        #  err[torch.abs(err) < subn] = 0.0
         torch.addcmul(
                 update_buffer[:, i + 1:],
                 err.unsqueeze(1),
                 corr.unsqueeze(0),
-                value=d_inv,
+                value=1.0,
                 out=update_buffer[:, i+1:]
                 )
         #W[torch.abs(W) < subn] = 0.0
@@ -510,7 +510,7 @@ def gptq_fwrd_fp64_ref(
         S_tail = S[:, current_rank:]
         Z_tail = Z[:, current_rank:]
 
-        q_tail = torch.round(W_tail / S_tail + Z_tail).clamp(quantizer.min_q, quantizer.max_q)
+        q_tail = torch.floor(W_tail / S_tail + Z_tail + 0.5).clamp(quantizer.min_q, quantizer.max_q)
         W[:, current_rank:] = (q_tail - Z_tail) * S_tail
 
     # restore original column order
