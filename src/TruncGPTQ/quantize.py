@@ -219,7 +219,7 @@ def main():
                 if args.mode in {"svd", "eigh"}:
                     had_mat = shared_stats["had_mat"]
                     final_W, used_rank = gptq_fwrd_fp64_ref(
-                            weight_mat=W @ had_mat,
+                            weight_mat=W.to(torch.float64) @ had_mat,
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             perm=shared_stats["perm"],
@@ -231,7 +231,7 @@ def main():
                 elif args.mode == "gptq":
                     had_mat = shared_stats["had_mat"]
                     final_W, _ = gptq_fwrd_fp64_ref(
-                            weight_mat=W @ had_mat,
+                            weight_mat=W.to(torch.float64) @ had_mat,
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             #block_size=1024,
