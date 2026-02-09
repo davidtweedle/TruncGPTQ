@@ -217,7 +217,7 @@ class HessianAccumulator:
         self.H = torch.zeros((in_features, in_features), device=device, dtype=dtype)
         self.n_samples = 0
         if had_mat is None:
-            had_mat = torch.eye(in_features, dtype=torch.float64)
+            had_mat = torch.eye(in_features, dtype=torch.float64, device=device)
         self.had_mat = had_mat
 
     def add_batch(self, x):
