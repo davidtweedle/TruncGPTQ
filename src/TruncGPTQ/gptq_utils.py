@@ -518,7 +518,7 @@ def gptq_fwrd_fp32_ref(
                         out=W[:, j+1:end]
                         )
             if end < current_rank:
-                W[:, end] = update_block(
+                W[:, end:] = update_block(
                         W[:, end:],
                         torch.diagonal(Hinv1),
                         H_inv_sqrt[i: end, end:],
