@@ -217,13 +217,13 @@ class HessianAccumulator:
         self.H = torch.zeros((in_features, in_features), device=device, dtype=dtype)
         self.n_samples = 0
         if had_mat is None:
-            had_mat = torch.eye(in_features, dtype=torch.float64, device=device)
-        self.had_mat = had_mat
+            had_mat = torch.eye(in_features, dtype=dtype, device=device)
+        self.had_mat = had_mat.to(dtype=dtype)
 
     def add_batch(self, x):
         if x.dim() == 3:
             x = x.reshape(-1, x.shape[-1])
-        x = x.to(self.H.dtype) @ self.had_mat.T
+        x = x.to(self.H.dtype) @ self.had_mat
         self.H.addmm_(x.T, x)
         self.n_samples += x.shape[0]
 

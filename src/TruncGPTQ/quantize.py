@@ -127,7 +127,7 @@ def main():
                 else:
                     group_size = args.group_size
                     num_blocks = in_features // group_size
-                had_mat_block = torch.tensor(had_utils.had_order_n(group_size), device=args.device, dtype=torch.float32) * (group_size ** -0.5)
+                had_mat_block = torch.tensor(had_utils.had_order_n(group_size), device=args.device, dtype=torch.float64) * (group_size ** -0.5)
                 if num_blocks == 1:
                     had_mat = had_mat_block
                 else:
@@ -226,7 +226,7 @@ def main():
                 if args.mode in {"svd", "eigh"}:
                     had_mat = shared_stats["had_mat"]
                     final_W, used_rank = gptq_fwrd(
-                            weight_mat=W @ had_mat,
+                            weight_mat=W @ had_mat.to(torch.float32),
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             perm=shared_stats["perm"],
@@ -234,18 +234,18 @@ def main():
                             use_triton=True,
                             R_x=shared_stats.get("R_x")
                             )
-                    final_W = final_W @ had_mat.T
+                    final_W = final_W @ had_mat.to(torch.float32).T
                 elif args.mode == "gptq":
                     had_mat = shared_stats["had_mat"]
                     final_W, _ = gptq_fwrd(
-                            weight_mat=W @ had_mat,
+                            weight_mat=W @ had_mat.to(torch.float32),
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             block_size=1024,
                             use_triton=False,
                             perm=shared_stats["perm"]
                             )
-                    final_W = final_W @ had_mat.T
+                    final_W = final_W @ had_mat.to(torch.float32).T
                 elif args.mode == "test":
                     final_W = W
                 submodule.weight.copy_(final_W)
