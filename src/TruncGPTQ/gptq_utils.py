@@ -623,14 +623,22 @@ def gptq_fwrd(
             Q_final[:, i1:i2] = w_block_quantized
 
             if use_triton:
-                H_inv_sqrt_cross = H_inv_sqrt[i1:i2, i2:]
-                diag_vals = torch.diagonal(Hinv1)
+                N_live = in_features - i2
+                N_pad = (N_live + block_size - 1) // block_size
+                W_slice = torch.zeros((W.shape[0], N_pad), device=device, dtype=torch.float32)
+                W_slice[:, :N_live] = W[:, i2:]
+                H_inv_buf = torch.zeros((block_size, N_pad), device=device, dtype=torch.float32)
+                H_inv_buf[:count, :N_live] = H_inv_sqrt[i1:i2, i2:]
+                E_buf = torch.zeros((W.shape[0], block_size), device=device, dtype=torch.float32)
+                E_buf[:, :count] = E_block
+                diag_buf = torch.ones((block_size,), device=device, dtype=torch.float32)
+                diag_buf[:count] = torch.diagonal(Hinv1)
                 W[:, i2:] = update_block(
-                        W[:, i2:],
-                        diag_vals,
-                        H_inv_sqrt_cross,
-                        E_block
-                        )
+                        W_slice,
+                        diag_buf,
+                        H_inv_buf,
+                        E_buf
+                        )[:, :N_live]
 
             else:
                 Global_delta = E_block.matmul(H_inv_sqrt[i1:i2, i2:])
