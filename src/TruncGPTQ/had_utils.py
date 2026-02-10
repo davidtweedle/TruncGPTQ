@@ -29,4 +29,3 @@ def had_order_n(n: int):
     top = [row + row for row in H_half]
     bottom = [row + [-x for x in row] for row in H_half]
     return top + bottom
-

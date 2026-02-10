@@ -121,10 +121,17 @@ def main():
             capture_start = time.time()
             had_mat = None
             if args.rotate_weights:
-                had_mat_arr = had_utils.had_order_n(in_features)
-                had_mat = torch.tensor(had_mat_arr, dtype=torch.float64, device=args.device) * (in_features ** -0.5)
-                signs = torch.randint(0, 2, (in_features,), device=had_mat.device) * 2 - 1
-                had_mat = signs[:, None] * had_mat
+                if args.group_size == -1:
+                    group_size = in_features
+                    num_blocks = 1
+                else:
+                    group_size = args.group_size
+                    num_blocks = in_features // group_size
+                had_mat_block = torch.tensor(had_utils.had_order_n(group_size), device=args.device, dtype=torch.float32) * (group_size ** -0.5)
+                if num_blocks == 1:
+                    had_mat = had_mat_block
+                else:
+                    had_mat = torch.block_diag(*had_mat_block.unsqueeze(0).repeat(num_blocks, 1, 1))
             if args.mode == "svd":
                 rank = int(in_features * args.sketch_ratio)
                 accumulator = Sketcher(submodule, rank, device=args.device, had_mat=had_mat)
@@ -218,24 +225,24 @@ def main():
                 used_rank = "N/A"
                 if args.mode in {"svd", "eigh"}:
                     had_mat = shared_stats["had_mat"]
-                    final_W, used_rank = gptq_fwrd_fp32_ref(
-                            weight_mat=W.to(torch.float64) @ had_mat,
+                    final_W, used_rank = gptq_fwrd(
+                            weight_mat=W @ had_mat,
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             perm=shared_stats["perm"],
                             block_size=128,
-                            #use_triton=True,
+                            use_triton=True,
                             R_x=shared_stats.get("R_x")
                             )
                     final_W = final_W @ had_mat.T
                 elif args.mode == "gptq":
                     had_mat = shared_stats["had_mat"]
-                    final_W, _ = gptq_fwrd_fp32_ref(
-                            weight_mat=W.to(torch.float64) @ had_mat,
+                    final_W, _ = gptq_fwrd(
+                            weight_mat=W @ had_mat,
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             block_size=1024,
-                            #use_triton=False,
+                            use_triton=False,
                             perm=shared_stats["perm"]
                             )
                     final_W = final_W @ had_mat.T

@@ -615,8 +615,8 @@ def gptq_fwrd(
                     q_dequant = (q - z) * s
                     Q1[:, i] = q_dequant
                     err = (w - q_dequant) / d
-                    delta = err.unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
-                    W1[:, i:] -= delta
+                    delta = err.unsqueeze(1).matmul(Hinv1[i, i + 1:].unsqueeze(0))
+                    W1[:, i + 1:] -= delta
                     Err1[:, i] = err
                 w_block_quantized = Q1
                 E_block = Err1
