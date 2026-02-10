@@ -622,20 +622,19 @@ def gptq_fwrd(
                 E_block = Err1
             Q_final[:, i1:i2] = w_block_quantized
 
-            if i2 < in_features:
-                if use_triton:
-                    H_inv_sqrt_cross = H_inv_sqrt[i1:i2, i2:]
-                    diag_vals = torch.diagonal(Hinv1)
-                    W[:, i2:] = update_block(
-                            W[:, i2:],
-                            diag_vals,
-                            H_inv_sqrt_cross,
-                            E_block
-                            )
+            if use_triton:
+                H_inv_sqrt_cross = H_inv_sqrt[i1:i2, i2:]
+                diag_vals = torch.diagonal(Hinv1)
+                W[:, i2:] = update_block(
+                        W[:, i2:],
+                        diag_vals,
+                        H_inv_sqrt_cross,
+                        E_block
+                        )
 
-                else:
-                    Global_delta = E_block.matmul(H_inv_sqrt[i1:i2, i2:])
-                    W[:, i2:] -= Global_delta
+            else:
+                Global_delta = E_block.matmul(H_inv_sqrt[i1:i2, i2:])
+                W[:, i2:] -= Global_delta
 
         if current_rank < in_features:
             W_tail = W[:, current_rank:]
