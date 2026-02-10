@@ -460,10 +460,9 @@ def triton_process_block(
 # GPTQ Updates
 # ==============================================================================
 
-@torch.compile(mode="default", fullgraph=True, dynamic=True)
+@torch.compile(mode="max-autotune", fullgraph=True, dynamic=True)
 def update_block(W_slice, diag, corr, Err):
-    inv_diag = 1.0 / diag
-    scale_corr = corr * inv_diag.unsqueeze(1)
+    scale_corr = corr / diag[:, None]
     update = Err @ scale_corr
     return W_slice - update
 
@@ -627,7 +626,7 @@ def gptq_fwrd(
                 if use_triton:
                     H_inv_sqrt_cross = H_inv_sqrt[i1:i2, i2:]
                     diag_vals = torch.diagonal(Hinv1)
-                    update_block(
+                    W[:, i2:] = update_block(
                             W[:, i2:],
                             diag_vals,
                             H_inv_sqrt_cross,
