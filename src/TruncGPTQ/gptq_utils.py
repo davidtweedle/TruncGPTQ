@@ -624,7 +624,7 @@ def gptq_fwrd(
 
             if use_triton:
                 N_live = in_features - i2
-                N_pad = (N_live + block_size - 1) // block_size
+                N_pad = ((N_live + block_size - 1) // block_size) * block_size
                 W_slice = torch.zeros((W.shape[0], N_pad), device=device, dtype=torch.float32)
                 W_slice[:, :N_live] = W[:, i2:]
                 H_inv_buf = torch.zeros((block_size, N_pad), device=device, dtype=torch.float32)
