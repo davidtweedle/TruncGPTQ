@@ -21,6 +21,14 @@ from jax.dlpack import from_dlpack
 import triton
 import triton.language as tl
 
+try:
+    import TruncGPTQ.gptq_ops as custom_kernels
+    HAS_CUDA_KERNELS = True
+except ImportError:
+    HAS_CUDA_KERNELS = False
+    print("Warning: Custom GPTQ CUDA kernels not found. Falling back to slow path.")
+
+
 # JAX Configuration
 # Enable x64 for precision in QR decomposition
 jax.config.update("jax_enable_x64", True)
@@ -549,8 +557,8 @@ def gptq_fwrd(
         H_inv_sqrt: torch.Tensor,
         quantizer: Quantizer,
         perm: torch.Tensor,
-        block_size: int = 128,
-        use_triton: bool = True,
+        block_size: int = 64,
+        use_fused_kernel: bool = True,
         R_x: Optional[torch.Tensor] = None
         ) -> Tuple[torch.Tensor, int]:
     """
@@ -568,7 +576,7 @@ def gptq_fwrd(
         orig_dtype = weight_mat.dtype
         weight_mat = weight_mat.to(device=device, dtype=torch.float32)
 
-        H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=torch.float32)
+        H_inv_sqrt = H_inv_sqrt.to(device=device, dtype=torch.float32).contiguous()
 
         current_rank = H_inv_sqrt.shape[0]
 
@@ -578,9 +586,10 @@ def gptq_fwrd(
         # Block wise quantization
         quantizer.find_params(weight_mat)
         S_full, Z_full = quantizer.get_expanded_params(out_features, in_features)
-        W = weight_mat[:, perm].clone()
-        S = S_full[:, perm].to(torch.float16).to(device=device, dtype=torch.float32).clone()
-        Z = Z_full[:, perm].to(device=device, dtype=torch.float32).clone()
+        W = weight_mat[:, perm].contiguous()
+        S = S_full[:, perm].to(torch.float16).to(device=device, dtype=torch.float32).contiguous()
+        Z = Z_full[:, perm].to(device=device, dtype=torch.float32).contiguous()
+        Err_buf = torch.zeros((out_features, block_size), device=device, dtype=torch.float32)
 
         Q_final = torch.zeros_like(W)
 
@@ -588,73 +597,58 @@ def gptq_fwrd(
             i2 = min(i1 + block_size, current_rank)
             count = i2 - i1
 
-            W1 = W[:, i1:i2]
-            S1 = S[:, i1:i2]
-            Z1 = Z[:, i1:i2]
-            Hinv1 = H_inv_sqrt[i1:i2, i1:i2]
-            if use_triton:
-                w_block_quantized, E_block = triton_process_block(
-                        W1,
-                        S1,
-                        Z1,
-                        Hinv1,
-                        quantizer
+
+            if use_fused_kernel and HAS_CUDA_KERNELS:
+
+                custom_kernels.fused_gptq_step(
+                        W,
+                        Err_buf,
+                        H_inv_sqrt,
+                        S, Z,
+                        i1,
+                        quantizer.min_q,
+                        quantizer.max_q
                         )
 
             else:
-                Q1 = torch.zeros_like(W1)
+
+                W1 = W[:, i1:i2]
+                S1 = S[:, i1:i2]
+                Z1 = Z[:, i1:i2]
+                Hinv1 = H_inv_sqrt[i1:i2, i1:i2]
                 Err1 = torch.zeros_like(W1)
-                
                 for i in range(count):
-                    w = W1[:, i]
+                    w = W1[:, i].clone()
                     d = Hinv1[i, i]
                     s = S1[:, i]
                     z = Z1[:, i]
 
                     q = torch.round(w / s + z).clamp(quantizer.min_q, quantizer.max_q)
                     q_dequant = (q - z) * s
-                    Q1[:, i] = q_dequant
+                    W1[:, i] = q_dequant
                     err = (w - q_dequant) / d
-                    delta = err.unsqueeze(1).matmul(Hinv1[i, i + 1:].unsqueeze(0))
-                    W1[:, i + 1:] -= delta
                     Err1[:, i] = err
-                w_block_quantized = Q1
+                    if i + 1 < count:
+                        delta = err.unsqueeze(1).matmul(Hinv1[i, i + 1:].unsqueeze(0))
+                        W1[:, i + 1:] -= delta
                 E_block = Err1
-            Q_final[:, i1:i2] = w_block_quantized
 
-            if use_triton:
-                N_live = in_features - i2
-                N_pad = ((N_live + block_size - 1) // block_size) * block_size
-                W_slice = torch.zeros((W.shape[0], N_pad), device=device, dtype=torch.float32)
-                W_slice[:, :N_live] = W[:, i2:]
-                H_inv_buf = torch.zeros((block_size, N_pad), device=device, dtype=torch.float32)
-                H_inv_buf[:count, :N_live] = H_inv_sqrt[i1:i2, i2:]
-                E_buf = torch.zeros((W.shape[0], block_size), device=device, dtype=torch.float32)
-                E_buf[:, :count] = E_block
-                diag_buf = torch.ones((block_size,), device=device, dtype=torch.float32)
-                diag_buf[:count] = torch.diagonal(Hinv1)
-                W[:, i2:] = update_block(
-                        W_slice,
-                        diag_buf,
-                        H_inv_buf,
-                        E_buf
-                        )[:, :N_live]
+                if i2 < current_rank:
+                    Global_delta = E_block.matmul(H_inv_sqrt[i1:i2, i2:])
+                    W[:, i2:] -= Global_delta
 
-            else:
-                Global_delta = E_block.matmul(H_inv_sqrt[i1:i2, i2:])
-                W[:, i2:] -= Global_delta
 
         if current_rank < in_features:
-            W_tail = W[:, current_rank:]
+            W_tail = W[:, current_rank:].clone()
             S_tail = S[:, current_rank:]
             Z_tail = Z[:, current_rank:]
 
             q_tail = torch.round(W_tail / S_tail + Z_tail).clamp(quantizer.min_q, quantizer.max_q)
-            Q_final[:, current_rank:] = (q_tail - Z_tail) * S_tail
+            W[:, current_rank:] = (q_tail - Z_tail) * S_tail
 
         # restore original column order
         inv_perm = torch.argsort(perm)
-        final_W = Q_final[:, inv_perm]
+        final_W = W[:, inv_perm].contiguous()
         torch.cuda.synchronize()
 
         if R_x is not None:

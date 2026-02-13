@@ -230,8 +230,8 @@ def main():
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
                             perm=shared_stats["perm"],
-                            block_size=128,
-                            use_triton=True,
+                            block_size=64,
+                            use_fused_kernel=True,
                             R_x=shared_stats.get("R_x")
                             )
                     final_W = final_W @ had_mat.to(torch.float32).T
@@ -241,8 +241,8 @@ def main():
                             weight_mat=W @ had_mat.to(torch.float32),
                             H_inv_sqrt=shared_stats["R"],
                             quantizer=quantizer,
-                            block_size=1024,
-                            use_triton=False,
+                            block_size=64,
+                            use_fused_kernel=True,
                             perm=shared_stats["perm"]
                             )
                     final_W = final_W @ had_mat.to(torch.float32).T

@@ -1,16 +1,21 @@
 #!/bin/bash
 set -e
-echo "=== Creating Conda Environment (gptq-svd) ==="
+echo "=== Creating Conda Environment (trunc-gptq) ==="
 
 conda create -n trunc-gptq python=3.11 -y
 source $(conda info --base)/etc/profile.d/conda.sh
 conda activate trunc-gptq
+
+conda install -c nvidia cuda-nvcc=12.4 -y
+conda install -c conda-forge gxx_linux-64 -y
+pip install ninja packaging
 
 echo "=== Installing Magma ==="
 conda install -c conda-forge magma==2.7.2 -y
 
 echo "=== Installing Pytorch 2.6.0 (CUDA 12.4) ==="
 pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+
 
 pip install -e .
 
